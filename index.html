@@ -1,0 +1,4468 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>A4L ワンオペ入力PoC</title>
+<!-- iPhoneで「ホーム画面に追加」したときにブラウザUIなしの全画面で開く（球場での実地テスト用） -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="A4L スコア">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131312" media="(prefers-color-scheme: dark)">
+<meta name="format-detection" content="telephone=no">
+<style>
+/* ============================================================
+   A4L ワンオペ入力PoC — A4Lブランド準拠デザイン
+   参照: https://www.a4l.group/ のCSS実測値と実画面
+     モノクローム基調（#000 / #FFF / #8F8F8F / #E2E2E2 / #6E6E6D / #2F2E2E）
+     アクセント = ヒーロー画のゴールド（実測 #F4AB1D〜#D49748）
+     セカンダリ = サイトCSSの深緑 rgb(63,118,82)
+     質感 = フラット（影を使わない）・ヘアライン・小さい角丸・英字はワイドトラッキング
+   ============================================================ */
+:root {
+  --ink: #1d1d1d; --ink-2: #2f2e2e; --muted: #6e6e6d; --faint: #8f8f8f;
+  --bg: #f6f6f4; --panel: #ffffff; --line: #e2e2e2; --line-strong: #c9c9c6;
+  --gold: #c98b1e; --gold-bright: #e8a01c; --gold-soft: #fbf3e2;
+  --green: #3f7652; --green-soft: #edf3ef;
+  --sel: #1d1d1d; --sel-ink: #ffffff;
+  --radius: 4px; --radius-sm: 3px;
+  --latin: "Avenir Next", Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f2f1ee; --ink-2: #e6e4e0; --muted: #a9a7a2; --faint: #85837e;
+    --bg: #131312; --panel: #1e1e1c; --line: #34332f; --line-strong: #4a4844;
+    --gold: #e2a93c; --gold-bright: #f0b64a; --gold-soft: #32291a;
+    --green: #5da77c; --green-soft: #1a231d;
+    --sel: #f2f1ee; --sel-ink: #17170f;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-size: 16px; line-height: 1.5; padding: 12px 10px 24px; max-width: 700px; margin: 0 auto;
+  overflow-x: hidden; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased;
+}
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 8px; }
+
+/* ---- ブランドロックアップ（A4L | ATHLETE FOR LIFE の組み） ---- */
+.topline { display: flex; align-items: center; gap: 10px; padding: 2px 2px 10px; }
+.brand { display: flex; align-items: center; gap: 7px; text-decoration: none; color: var(--ink); }
+.brand .mark { font-family: var(--latin); font-size: 21px; font-weight: 800; letter-spacing: .01em; line-height: 1; }
+.brand .rule { width: 1px; height: 22px; background: var(--line-strong); }
+.brand .sub { font-family: var(--latin); font-size: 6.5px; font-weight: 700; letter-spacing: .3em; line-height: 1.45; color: var(--muted); }
+.meta-line { flex: 1; min-width: 0; font-size: 11px; color: var(--muted); letter-spacing: .02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag { font-family: var(--latin); background: var(--ink); color: var(--panel); border-radius: 2px;
+  padding: 3px 7px; font-size: 9.5px; font-weight: 700; letter-spacing: .12em; }
+.topline button.scorer { padding: 5px 9px; font-size: 10.5px; letter-spacing: .04em; border-radius: 2px; font-weight: 700; }
+.topline button.scorer.unset { color: var(--gold); border-color: var(--gold); }
+.sub { color: var(--muted); font-size: 12px; padding: 6px 2px 0; line-height: 1.6; }
+
+/* ---- ヘッダ（イニング・カウント・イニングスコア） ---- */
+.header { padding: 10px 12px 8px; position: sticky; top: 0; z-index: 20; }
+.hd-top { display: flex; align-items: center; gap: 16px; padding: 0 1px 8px; }
+.st-inning { display: flex; align-items: baseline; gap: 2px; }
+.st-num { font-family: var(--latin); font-size: 30px; font-weight: 800; line-height: .9; letter-spacing: -.02em; }
+.st-half { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: .08em; }
+.st-count { display: flex; gap: 16px; }
+.st-final { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .16em; font-family: var(--latin); text-transform: uppercase; }
+.cnt { display: flex; align-items: center; gap: 5px; }
+.cnt .lbl { font-family: var(--latin); font-size: 10px; font-weight: 800; color: var(--faint); letter-spacing: .1em; }
+.dots { display: inline-flex; gap: 3px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--line-strong); }
+.dot.b.on { background: var(--green); border-color: var(--green); }
+.dot.s.on { background: var(--gold); border-color: var(--gold); }
+.dot.o.on { background: var(--ink); border-color: var(--ink); }
+
+.mini-line { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.mini-line th, .mini-line td { padding: 3px 0; text-align: center; border: none; }
+.mini-line thead th { font-family: var(--latin); font-size: 9.5px; color: var(--faint); font-weight: 700; letter-spacing: .06em; }
+.mini-line thead { border-bottom: 1px solid var(--line); }
+.mini-line .tname { text-align: left; font-weight: 700; font-size: 12px; letter-spacing: .01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+.mini-line tbody tr + tr { border-top: 1px solid var(--line); }
+.mini-line tbody tr.batting .tname::before { content: ""; display: inline-block; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--gold-bright); margin-right: 6px; vertical-align: middle; }
+.mini-line .inn.now { background: var(--gold-soft); font-weight: 800; }
+.mini-line .rh { width: 9%; font-weight: 700; border-left: 1px solid var(--line); }
+.mini-line .rh.runs { font-family: var(--latin); font-size: 16px; font-weight: 800; }
+
+/* ---- 状況カード ---- */
+.situation { display: flex; align-items: center; gap: 14px; padding: 12px; }
+.diamond { width: 84px; height: 76px; flex-shrink: 0; }
+.diamond.big { width: 96px; height: 88px; }
+.diamond .dpath { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
+.diamond .base { fill: var(--panel); stroke: var(--line-strong); stroke-width: 2; }
+.diamond .base.on { fill: var(--gold-bright); stroke: var(--gold-bright); }
+.diamond .base.home { fill: var(--line); stroke: var(--line-strong); stroke-width: 1.5; }
+.diamond .runner-name { font-size: 11px; font-weight: 700; fill: var(--muted); }
+.sit-main { flex: 1; min-width: 0; }
+.batter-line { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.chip { font-family: var(--latin); font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 2px; padding: 2px 5px; }
+.batter-name { font-size: 20px; font-weight: 700; letter-spacing: .01em; }
+
+/* ---- 配球ストリップ ---- */
+.strip { display: flex; align-items: center; gap: 7px; padding: 9px 12px; flex-wrap: wrap; min-height: 40px; }
+.strip-label { font-family: var(--latin); font-size: 9.5px; font-weight: 700; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--faint); }
+.pbadge { display: inline-flex; align-items: center; gap: 4px; border: 1px solid; border-radius: 2px;
+  padding: 3px 7px; font-size: 12.5px; font-weight: 700; }
+.pbadge .pno { font-family: var(--latin); font-size: 9px; opacity: .65; }
+.pbadge .ptag, .pbadge .pzone { font-size: 9.5px; font-weight: 700; opacity: .75; }
+.pbadge .pzone { border-left: 1px solid currentColor; padding-left: 4px; }
+.pbadge.s { color: var(--gold); border-color: var(--gold); background: var(--gold-soft); }
+.pbadge.b { color: var(--green); border-color: var(--green); background: var(--green-soft); }
+.pbadge.f { color: var(--muted); border-color: var(--line-strong); background: var(--bg); }
+
+/* ---- タブ ---- */
+.input-card { padding: 0 0 14px; }
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
+.tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+  padding: 14px 4px; font-size: 14px; font-weight: 700; letter-spacing: .06em; color: var(--faint); cursor: pointer; }
+.tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+.pane { padding: 12px 12px 0; }
+
+/* ---- ボタン（フラット・ヘアライン・選択は黒ベタ） ---- */
+button {
+  font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm); padding: 12px 8px; cursor: pointer; font-weight: 700; letter-spacing: .02em;
+  transition: background .12s ease, color .12s ease;
+}
+button:active { background: var(--bg); }
+button:disabled { opacity: .3; cursor: not-allowed; }
+button.big { padding: 21px 10px; font-size: 17px; letter-spacing: .04em; }
+button.wide { width: 100%; margin-top: 8px; }
+button.primary { background: var(--ink); border-color: var(--ink); color: var(--panel); }
+button.hot { color: var(--gold); border-color: var(--gold); }
+button.cool { color: var(--green); border-color: var(--green); }
+button.sel { background: var(--sel); border-color: var(--sel); color: var(--sel-ink); }
+button.ghost { background: transparent; border-color: var(--line); }
+button.res { padding: 15px 6px; font-size: 14.5px; }
+button.res.hit { border-color: var(--ink); }
+button.res.out { border-color: var(--line); color: var(--muted); }
+button.res.other { border-color: var(--line); color: var(--muted); }
+button.small-link { padding: 10px 6px; font-size: 11.5px; letter-spacing: .06em; color: var(--muted);
+  border-style: dashed; border-color: var(--line); }
+.grid { display: grid; gap: 8px; }
+.g2 { grid-template-columns: 1fr 1fr; }
+.g3 { grid-template-columns: repeat(3, 1fr); }
+.pad { margin-top: 10px; }
+
+/* ---- セグメント（かんたん/コース・見逃し/空振り/ファウル） ---- */
+.seg { display: flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.seg.small { margin-top: 10px; }
+.seg-btn { flex: 1; background: transparent; border: none; border-radius: 0; padding: 11px 6px;
+  font-size: 12.5px; font-weight: 700; letter-spacing: .04em; color: var(--muted); }
+.seg-btn + .seg-btn { border-left: 1px solid var(--line); }
+.seg-btn.on { background: var(--ink); color: var(--panel); }
+
+/* ---- 球種 ---- */
+.ptype { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 12px; }
+.ptype-label { font-family: var(--latin); font-size: 9.5px; font-weight: 700; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--faint); margin-right: 3px; }
+.ptype-btn { padding: 7px 11px; font-size: 12px; border-radius: 2px; font-weight: 700; }
+.ptype-btn.on { background: var(--ink); border-color: var(--ink); color: var(--panel); }
+
+/* ---- 5×5 コースグリッド ---- */
+.zone { margin: 14px auto 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; max-width: 320px; }
+.zcell { aspect-ratio: 1 / 1; padding: 0; border-radius: 2px; background: var(--panel);
+  border: 1px dashed var(--line); display: flex; align-items: center; justify-content: center; }
+.zcell.strike { background: var(--gold-soft); border: 1px solid var(--gold); }
+.zcell .znum { font-family: var(--latin); font-size: 10.5px; font-weight: 700; color: var(--faint); }
+.zcell.strike .znum { color: var(--gold); }
+
+/* ---- 固定フッタ ---- */
+.footbar { position: sticky; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)); margin-bottom: 8px; }
+.footbar button { padding: 12px 4px; font-size: 12px; letter-spacing: .04em; }
+
+/* ---- セクション・表 ---- */
+.section { padding: 0; }
+.section h2 { font-size: 13px; margin: 0; padding: 14px 14px 8px; letter-spacing: .06em; font-weight: 700; }
+.section h2 + .scroll-x, .section h2 + div { border-top: 1px solid var(--line); padding-top: 10px; }
+.collapse-head { width: 100%; display: flex; justify-content: space-between; align-items: center;
+  background: transparent; border: none; border-radius: var(--radius); padding: 14px;
+  font-size: 13px; font-weight: 700; letter-spacing: .04em; }
+.collapse-head .caret { color: var(--faint); font-weight: 700; }
+.section > .scroll-x, .section > div { padding: 0 12px 14px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-family: var(--latin); color: var(--faint); font-weight: 700; font-size: 10px; letter-spacing: .1em; }
+td.sum { font-weight: 800; }
+tfoot td { color: var(--muted); font-size: 11.5px; }
+.recap { white-space: pre-wrap; line-height: 1.9; font-size: 14.5px; }
+.scroll-x { overflow-x: auto; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); }
+.metric { background: var(--panel); padding: 9px 10px; }
+.metric .k { font-size: 10px; color: var(--muted); letter-spacing: .02em; }
+.metric .v { font-family: var(--latin); font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; }
+textarea { width: 100%; max-width: 100%; margin-top: 10px; font-size: 10.5px; border-radius: 2px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--muted); padding: 8px; }
+input[type=number], input[type=text] { font: inherit; padding: 11px; border-radius: 2px;
+  border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); }
+input[type=number] { width: 100px; }
+input[type=text] { width: 100%; }
+
+/* ---- タグ・バナー・シート ---- */
+.tag-sub { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+.tagbody { padding: 0 12px 14px; }
+.tagbody .chips button { padding: 9px 12px; font-size: 13px; }
+.tagfold .collapse-head { color: var(--muted); font-size: 12px; }
+.banner { padding: 10px 12px; border-radius: 2px; margin-bottom: 8px; font-size: 13px; font-weight: 700;
+  border-left: 3px solid; }
+.banner.err { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-left: 3px solid var(--gold); }
+.banner.ok { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-left: 3px solid var(--green); }
+.banner.warn { background: var(--gold-soft); color: var(--ink); border: 1px solid var(--gold); }
+.sheet-bg { position: fixed; inset: 0; background: rgba(20,20,18,.55); display: flex; align-items: flex-end;
+  justify-content: center; z-index: 60; }
+.sheet { background: var(--panel); border-top: 2px solid var(--ink); border-radius: 0; padding: 18px 16px;
+  width: 100%; max-width: 700px; max-height: 90vh; overflow: auto; }
+.sheet h2 { margin: 0 0 12px; font-size: 15px; padding: 0; letter-spacing: .04em; }
+.row-label { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: .04em; margin: 14px 0 6px; }
+.eyebrow { font-family: var(--latin); font-size: 9.5px; color: var(--faint); font-weight: 700;
+  letter-spacing: .18em; text-transform: uppercase; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { padding: 10px 13px; font-size: 13.5px; border-radius: 2px; }
+.sheet-actions { display: flex; gap: 8px; margin-top: 18px; }
+.sheet-actions button { flex: 1; padding: 14px 8px; letter-spacing: .06em; }
+footer { color: var(--faint); font-size: 10px; text-align: center; padding: 14px 0 4px;
+  letter-spacing: .1em; font-family: var(--latin); }
+
+/* 指で押す部分は最低44px（Appleのヒューマンインターフェース指針） */
+button.big, button.res, .tab, .footbar button, .seg-btn { min-height: 44px; }
+.zcell { min-height: 40px; }
+
+/* ---- スマホ（iPhone 390pt / Android 360dp） ---- */
+@media (max-width: 430px) {
+  body { padding: 10px 8px 20px; font-size: 15px; }
+  .brand .mark { font-size: 18px; }
+  .brand .sub { font-size: 6px; letter-spacing: .26em; }
+  .meta-line { font-size: 10px; }
+  .st-num { font-size: 26px; }
+  .st-count { gap: 10px; }
+  .mini-line { font-size: 11.5px; }
+  .mini-line .tname { font-size: 10.5px; }
+  .situation { gap: 10px; padding: 10px; }
+  .diamond.big { width: 84px; height: 78px; }
+  .batter-name { font-size: 18px; }
+  .tab { font-size: 13px; }
+  .pane { padding: 10px 10px 0; }
+  button.big { padding: 18px 8px; font-size: 16px; }
+  button.res { padding: 14px 4px; font-size: 13.5px; }
+  .zone { max-width: 100%; }
+  .ptype-btn { padding: 6px 9px; font-size: 11.5px; }
+  .metrics { grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); }
+  .footbar button { font-size: 11px; }
+}
+
+/* ---- MVPの器（ナビゲーションと一覧） ---- */
+.shellnav { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; margin-bottom: 10px;
+  border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.navbtn { background: transparent; border: none; border-radius: 0; padding: 12px 2px; font-size: 12px;
+  font-weight: 700; letter-spacing: .02em; color: var(--muted); min-height: 44px; }
+.navbtn + .navbtn { border-left: 1px solid var(--line); }
+.navbtn.active { background: var(--ink); color: var(--panel); }
+.gamerow { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.gamerow:first-child { border-top: none; }
+.g-main { flex: 1; min-width: 0; }
+.g-title { font-weight: 700; font-size: 14px; }
+.g-act { display: flex; gap: 6px; flex-shrink: 0; }
+.g-act button { padding: 9px 11px; font-size: 12px; }
+.consent-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.consent-row button { padding: 7px 12px; font-size: 12px; border-radius: 2px; }
+tr.undone td { color: var(--faint); text-decoration: line-through; }
+@media (max-width: 430px) {
+  .shellnav { grid-template-columns: repeat(3, 1fr); }
+  .navbtn:nth-child(n+4) { border-top: 1px solid var(--line); }
+  .navbtn:nth-child(4) { border-left: none; }
+  .g-title { font-size: 13px; }
+}
+
+</style>
+</head>
+<body>
+<div id="app"></div>
+<noscript>このPoCはJavaScriptで動作します。</noscript>
+<script>
+(() => {
+  // src/data.js
+  var ROSTERS = {
+    away: {
+      teamId: "AWAY",
+      name: "桜ヶ丘ベースボールクラブ",
+      players: [
+        { id: "a1", name: "佐藤健二", number: 1, order: 1 },
+        { id: "a2", name: "田中悠二", number: 2, order: 2 },
+        { id: "a3", name: "山田亮", number: 3, order: 3 },
+        { id: "a4", name: "中村拓海", number: 4, order: 4 },
+        { id: "a5", name: "渡辺陽輝", number: 5, order: 5 },
+        { id: "a6", name: "小林大輝", number: 6, order: 6 },
+        { id: "a7", name: "鈴木翔太", number: 7, order: 7 },
+        { id: "a8", name: "高橋蓮", number: 8, order: 8 },
+        { id: "a9", name: "伊藤陽翔", number: 9, order: 9 }
+      ],
+      bench: [
+        { id: "ab1", name: "山本悠太", number: 10 },
+        { id: "ab2", name: "藤本海斗", number: 11 },
+        { id: "ab3", name: "加藤陸", number: 12 },
+        { id: "ab4", name: "佐々木翔", number: 13 }
+      ],
+      pitcherId: "a1"
+    },
+    home: {
+      teamId: "HOME",
+      name: "あさひ中央ジュニア",
+      players: [
+        { id: "h1", name: "岡田蒼介", number: 1, order: 1 },
+        { id: "h2", name: "林海斗", number: 2, order: 2 },
+        { id: "h3", name: "井上陽翔", number: 3, order: 3 },
+        { id: "h4", name: "森大輝", number: 4, order: 4 },
+        { id: "h5", name: "中川蓮", number: 5, order: 5 },
+        { id: "h6", name: "清水亮", number: 6, order: 6 },
+        { id: "h7", name: "近藤悠斗", number: 7, order: 7 },
+        { id: "h8", name: "原健二", number: 8, order: 8 },
+        { id: "h9", name: "青木翔太", number: 9, order: 9 }
+      ],
+      bench: [
+        { id: "hb1", name: "黒川拓海", number: 10 },
+        { id: "hb2", name: "武田陽輝", number: 11 },
+        { id: "hb3", name: "西田悠斗", number: 12 },
+        { id: "hb4", name: "山口亮", number: 13 }
+      ],
+      pitcherId: "h1"
+    }
+  };
+  var GAME_INFO = {
+    gameId: "poc-demo-001",
+    title: "桜咲き大会 1回戦",
+    venue: "桜ヶ丘球場",
+    innings: 9
+  };
+
+  // store-core/src/types.js
+  var StoreError = class extends Error {
+    /** @param {StoreErrorCode} code */
+    constructor(code, message) {
+      super(message ?? code);
+      this.code = code;
+      this.name = "StoreError";
+    }
+  };
+
+  // store-core/src/store.js
+  function createStore(reducer, initial) {
+    const games = /* @__PURE__ */ new Map();
+    let idCounter = 0;
+    const get = (gameId) => {
+      const g = games.get(gameId);
+      if (!g) throw new StoreError("GAME_NOT_FOUND");
+      return g;
+    };
+    const activeDomain = (g) => {
+      const reverted = new Set(
+        g.log.filter((e) => e.kind === "compensation").map((e) => e.revertsEventId)
+      );
+      return g.log.filter((e) => e.kind === "domain" && !reverted.has(e.eventId));
+    };
+    const project = (g) => (
+      // initial は呼び出し側が保持するオブジェクト。同一参照を種にすると
+      // 「イベント0件の getState」で内部の initial を外へ露出させてしまうため必ず複製する
+      activeDomain(g).reduce((s, e) => reducer(s, e.event), structuredClone(initial))
+    );
+    return {
+      /**
+       * 新しい試合のログを作成する。
+       * 既存の gameId なら StoreError("GAME_EXISTS") を throw。
+       * @param {string} gameId
+       */
+      create(gameId) {
+        if (games.has(gameId)) throw new StoreError("GAME_EXISTS");
+        games.set(gameId, { log: [], finalized: null });
+      },
+      /**
+       * DomainEvent を記録し、記録された StoredEvent を返す。
+       * seq は試合ごとに 1 から始まる単調増加の連番（補償イベントも同じ連番を消費）。
+       * eventId はストア内で一意な文字列。
+       * 未知の gameId → StoreError("GAME_NOT_FOUND") ／ 確定済み → StoreError("GAME_FINALIZED")
+       * @param {string} gameId
+       * @param {DomainEvent} event
+       * @returns {StoredEvent}
+       */
+      append(gameId, event) {
+        const g = get(gameId);
+        if (g.finalized) throw new StoreError("GAME_FINALIZED");
+        const se = {
+          seq: g.log.length + 1,
+          eventId: `ev-${++idCounter}`,
+          gameId,
+          kind: "domain",
+          event: structuredClone(event)
+        };
+        g.log.push(se);
+        return structuredClone(se);
+      },
+      /**
+       * まだ取り消されていない最新の domain イベントを対象に、
+       * kind:"compensation"・revertsEventId:<対象のeventId> の StoredEvent を追記し、それを返す。
+       * 連続して呼ぶと新しい方から順に1件ずつ遡って取り消す。
+       * 補償イベント自体は取り消し対象にならない（redoは仕様外）。
+       * 取り消せる domain イベントが1件も無い → StoreError("NOTHING_TO_UNDO")
+       * @param {string} gameId
+       * @returns {StoredEvent}
+       */
+      undo(gameId) {
+        const g = get(gameId);
+        if (g.finalized) throw new StoreError("GAME_FINALIZED");
+        const target = activeDomain(g).at(-1);
+        if (!target) throw new StoreError("NOTHING_TO_UNDO");
+        const se = {
+          seq: g.log.length + 1,
+          eventId: `ev-${++idCounter}`,
+          gameId,
+          kind: "compensation",
+          revertsEventId: target.eventId
+        };
+        g.log.push(se);
+        return structuredClone(se);
+      },
+      /**
+       * イベントを取得する。
+       * opts.includeAll が false（既定）なら有効な domain イベントのみを返す。
+       * true なら補償イベントを含む全 StoredEvent を seq 昇順で返す。
+       * 返した配列・要素を呼び出し側が変更してもストア内部に影響しないこと。
+       * @param {string} gameId
+       * @param {{includeAll?:boolean}|undefined} [opts]
+       * @returns {StoredEvent[]}
+       */
+      getEvents(gameId, opts) {
+        const g = get(gameId);
+        return structuredClone(opts?.includeAll ? g.log : activeDomain(g));
+      },
+      /**
+       * ゲームの現在状態を返す。
+       * initial から始めて、有効な domain イベントを seq 昇順に reducer で畳み込んだ結果。
+       * イベント0件（または全て取り消し済み）なら initial と同値。
+       * @param {string} gameId
+       * @returns {S}
+       */
+      getState(gameId) {
+        return project(get(gameId));
+      },
+      /**
+       * OfficialRecord を生成して返す。以後、その試合への append/undo/再 finalize は StoreError("GAME_FINALIZED")。
+       * record は Object.freeze で凍結する（浅い凍結でよい）。
+       * @param {string} gameId
+       * @returns {OfficialRecord}
+       */
+      finalize(gameId) {
+        const g = get(gameId);
+        if (g.finalized) throw new StoreError("GAME_FINALIZED");
+        const rec = Object.freeze({
+          gameId,
+          finalizedAtSeq: g.log.length,
+          state: project(g),
+          activeEventCount: activeDomain(g).length
+        });
+        g.finalized = rec;
+        return rec;
+      },
+      /**
+       * 確定済みの OfficialRecord を返す。未確定なら StoreError("NOT_FINALIZED")。
+       * @param {string} gameId
+       * @returns {OfficialRecord}
+       */
+      getOfficialRecord(gameId) {
+        const g = get(gameId);
+        if (!g.finalized) throw new StoreError("NOT_FINALIZED");
+        return g.finalized;
+      }
+    };
+  }
+
+  // engine-core/src/types.js
+  var InvalidTransitionError = class extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "InvalidTransitionError";
+    }
+  };
+  function initialState() {
+    return {
+      inning: 1,
+      half: "top",
+      outs: 0,
+      balls: 0,
+      strikes: 0,
+      bases: { first: false, second: false, third: false },
+      awayRuns: 0,
+      homeRuns: 0
+    };
+  }
+
+  // engine-core/src/engine.js
+  var BASE_ORDER = { first: 1, second: 2, third: 3 };
+  var TARGET_NUM = { "1B": 1, "2B": 2, "3B": 3 };
+  var KEYS = ["first", "second", "third"];
+  function validateInPlay(s, adv, withBatter = true) {
+    for (const k of KEYS) {
+      if (adv[k] !== void 0 && !s.bases[k]) throw new InvalidTransitionError(`no runner on ${k}`);
+    }
+    for (const k of KEYS) {
+      const t = adv[k];
+      if (t !== void 0 && t in TARGET_NUM && TARGET_NUM[t] < BASE_ORDER[k]) {
+        throw new InvalidTransitionError(`backward move from ${k}`);
+      }
+    }
+    const ps = withBatter ? [{ order: 0, final: adv.batter }] : [];
+    for (const k of KEYS) {
+      if (s.bases[k]) ps.push({ order: BASE_ORDER[k], final: adv[k] ?? `${BASE_ORDER[k]}B` });
+    }
+    const onBase = ps.filter((p) => p.final in TARGET_NUM);
+    const finals = onBase.map((p) => TARGET_NUM[p.final]);
+    if (new Set(finals).size !== finals.length) throw new InvalidTransitionError("two players on same base");
+    const sorted = [...onBase].sort((a, b) => a.order - b.order);
+    for (let i = 1; i < sorted.length; i++) {
+      if (TARGET_NUM[sorted[i].final] <= TARGET_NUM[sorted[i - 1].final]) {
+        throw new InvalidTransitionError("runner passed another runner");
+      }
+    }
+    const newOuts = ps.filter((p) => p.final === "out").length;
+    if (s.outs + newOuts > 3) throw new InvalidTransitionError("fourth out");
+  }
+  function applyEvent(input, event) {
+    const s = structuredClone(input);
+    const score = (n) => {
+      if (n === 0) return;
+      if (s.half === "top") s.awayRuns += n;
+      else s.homeRuns += n;
+    };
+    const resetCount = () => {
+      s.balls = 0;
+      s.strikes = 0;
+    };
+    const maybeFlip = () => {
+      if (s.outs < 3) return;
+      s.outs = 0;
+      resetCount();
+      s.bases = { first: false, second: false, third: false };
+      if (s.half === "top") s.half = "bottom";
+      else {
+        s.half = "top";
+        s.inning += 1;
+      }
+    };
+    const forceAdvanceBatter = () => {
+      if (s.bases.first && s.bases.second && s.bases.third) score(1);
+      if (s.bases.first && s.bases.second) s.bases.third = true;
+      if (s.bases.first) s.bases.second = true;
+      s.bases.first = true;
+      resetCount();
+    };
+    if (event.kind === "pitch") {
+      if (event.result === "ball") {
+        s.balls += 1;
+        if (s.balls === 4) forceAdvanceBatter();
+      } else if (event.result === "hitByPitch") {
+        forceAdvanceBatter();
+      } else if (event.result === "foul") {
+        if (s.strikes < 2) s.strikes += 1;
+      } else {
+        s.strikes += 1;
+        if (s.strikes === 3) {
+          s.outs += 1;
+          resetCount();
+          maybeFlip();
+        }
+      }
+      return s;
+    }
+    if (event.kind === "inPlay") {
+      validateInPlay(s, event.advances);
+      const adv = event.advances;
+      const finals = [adv.batter];
+      for (const k of KEYS) if (s.bases[k]) finals.push(adv[k] ?? `${BASE_ORDER[k]}B`);
+      const outsOnPlay = finals.filter((f) => f === "out").length;
+      const nullifyRuns = event.forceThirdOut === true && s.outs + outsOnPlay >= 3;
+      if (!nullifyRuns) score(finals.filter((f) => f === "HOME").length);
+      const nb = { first: false, second: false, third: false };
+      for (const f of finals) {
+        if (f === "1B") nb.first = true;
+        if (f === "2B") nb.second = true;
+        if (f === "3B") nb.third = true;
+      }
+      s.bases = nb;
+      s.outs += finals.filter((f) => f === "out").length;
+      resetCount();
+      maybeFlip();
+      return s;
+    }
+    if (event.kind === "placeRunners") {
+      if (s.bases.first || s.bases.second || s.bases.third) {
+        throw new InvalidTransitionError("bases are not empty");
+      }
+      const b = event.bases ?? {};
+      if (!b.first && !b.second && !b.third) throw new InvalidTransitionError("no base specified");
+      s.bases = { first: !!b.first, second: !!b.second, third: !!b.third };
+      return s;
+    }
+    if (event.kind === "runnerAdvance") {
+      const adv = event.advances;
+      if (!KEYS.some((k) => adv[k] !== void 0)) {
+        throw new InvalidTransitionError("no runner specified");
+      }
+      validateInPlay(s, adv, false);
+      const finals = [];
+      for (const k of KEYS) if (s.bases[k]) finals.push(adv[k] ?? `${BASE_ORDER[k]}B`);
+      score(finals.filter((f) => f === "HOME").length);
+      const nb = { first: false, second: false, third: false };
+      for (const f of finals) {
+        if (f === "1B") nb.first = true;
+        if (f === "2B") nb.second = true;
+        if (f === "3B") nb.third = true;
+      }
+      s.bases = nb;
+      s.outs += finals.filter((f) => f === "out").length;
+      maybeFlip();
+      return s;
+    }
+    if (!s.bases[event.from]) throw new InvalidTransitionError(`no runner on ${event.from}`);
+    if (event.result === "safe") {
+      if (event.from === "first" && s.bases.second) throw new InvalidTransitionError("second occupied");
+      if (event.from === "second" && s.bases.third) throw new InvalidTransitionError("third occupied");
+      s.bases[event.from] = false;
+      if (event.from === "first") s.bases.second = true;
+      else if (event.from === "second") s.bases.third = true;
+      else score(1);
+    } else {
+      s.bases[event.from] = false;
+      s.outs += 1;
+      maybeFlip();
+    }
+    return s;
+  }
+
+  // src/lineup.js
+  var SubstitutionError = class extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "SubstitutionError";
+    }
+  };
+  function initialLineup(rosters) {
+    return {
+      away: rosters.away.players.map((p) => p.id),
+      home: rosters.home.players.map((p) => p.id)
+    };
+  }
+  function initialPitchers(rosters) {
+    return {
+      away: rosters.away.pitcherId,
+      home: rosters.home.pitcherId
+    };
+  }
+  function playerById(rosters, id) {
+    const findInTeam = (team) => {
+      if (team.players.find((p) => p.id === id)) return team.players.find((p) => p.id === id);
+      if (team.bench?.find((p) => p.id === id)) return team.bench.find((p) => p.id === id);
+      return null;
+    };
+    return findInTeam(rosters.away) || findInTeam(rosters.home);
+  }
+  function substitute(lineup, rosters, team, slot, playerId) {
+    if (team !== "away" && team !== "home") throw new SubstitutionError("チームは away または home を指定してください");
+    if (!Number.isInteger(slot) || slot < 0 || slot > 8) throw new SubstitutionError("打順スロットは 0〜8 の整数で指定してください");
+    const teamData = rosters[team];
+    const allPlayers = [...teamData.players, ...teamData.bench || []];
+    if (!allPlayers.find((p) => p.id === playerId)) throw new SubstitutionError("交代する選手は当該チームのベンチまたはスタメンに存在する必要があります");
+    const history = lineup.history ?? [];
+    if (history.includes(playerId)) throw new SubstitutionError("一度退いた選手は再出場できません");
+    const currentLineup = lineup[team];
+    if (currentLineup.includes(playerId)) throw new SubstitutionError("すでに打順に入っている選手には交代できません");
+    const newHistory = [...history, currentLineup[slot]];
+    const newLineup = [...currentLineup];
+    newLineup[slot] = playerId;
+    return { ...lineup, history: newHistory, [team]: newLineup };
+  }
+  function changePitcher(pitchers, rosters, team, playerId) {
+    if (team !== "away" && team !== "home") throw new SubstitutionError("チームは away または home を指定してください");
+    const teamData = rosters[team];
+    const allPlayers = [...teamData.players, ...teamData.bench || []];
+    if (!allPlayers.find((p) => p.id === playerId)) throw new SubstitutionError("交代する選手は当該チームのベンチまたはスタメンに存在する必要があります");
+    const currentPitcher = pitchers[team];
+    if (currentPitcher === playerId) throw new SubstitutionError("同じ投手には交代できません");
+    return { ...pitchers, [team]: playerId };
+  }
+  function eligible(rosters, lineup, team) {
+    if (team !== "away" && team !== "home") throw new SubstitutionError("チームは away または home を指定してください");
+    const bench = rosters[team].bench || [];
+    const currentLineup = lineup[team] || [];
+    const history = lineup.history || [];
+    const excludedIds = /* @__PURE__ */ new Set([...currentLineup, ...history]);
+    return bench.filter((p) => !excludedIds.has(p.id));
+  }
+
+  // src/game.js
+  var TARGET_BASE = { "1B": "first", "2B": "second", "3B": "third" };
+  function initialAppState(rosters) {
+    return {
+      rosters,
+      core: initialState(),
+      innings: 9,
+      orderIndex: { away: 0, home: 0 },
+      lineup: initialLineup(rosters),
+      // 打順スロットに今いる選手（交代で入れ替わる）
+      pitchers: initialPitchers(rosters),
+      // 各チームの現在の投手
+      linescore: { away: [], home: [] },
+      currentBatterId: null,
+      baseRunners: { first: null, second: null, third: null },
+      paSeq: 0,
+      finished: false
+    };
+  }
+  function appReducer(appState, domainEvent) {
+    if (!domainEvent || !domainEvent.type) return appState;
+    const ns = { ...appState };
+    const core = appState.core;
+    if (domainEvent.type === "gameStart") {
+      const payload = domainEvent.payload || {};
+      return {
+        ...ns,
+        core: initialState(),
+        innings: payload.innings ?? 9,
+        orderIndex: { away: 0, home: 0 },
+        linescore: { away: [], home: [] },
+        paSeq: 1,
+        lineup: initialLineup(ns.rosters),
+        pitchers: initialPitchers(ns.rosters),
+        currentBatterId: initialLineup(ns.rosters).away[0],
+        baseRunners: { first: null, second: null, third: null },
+        finished: false
+      };
+    }
+    if (domainEvent.type === "setInnings") {
+      const innings = Math.max(1, Number(domainEvent.payload?.innings) || ns.innings);
+      const finished = core.inning > innings && core.half === "top";
+      return { ...ns, innings, finished };
+    }
+    if (domainEvent.type === "placeRunners") {
+      const ids = domainEvent.payload ?? {};
+      const bases = { first: !!ids.first, second: !!ids.second, third: !!ids.third };
+      const newCore2 = applyEvent(core, { kind: "placeRunners", bases });
+      return {
+        ...ns,
+        core: newCore2,
+        baseRunners: { first: ids.first ?? null, second: ids.second ?? null, third: ids.third ?? null }
+      };
+    }
+    if (domainEvent.type === "substitute") {
+      const { team, slot, playerId } = domainEvent.payload;
+      const lineup = substitute(ns.lineup, ns.rosters, team, slot, playerId);
+      const battingTeam = core.half === "top" ? "away" : "home";
+      const isCurrent = team === battingTeam && slot === ns.orderIndex[team];
+      return { ...ns, lineup, currentBatterId: isCurrent ? playerId : ns.currentBatterId };
+    }
+    if (domainEvent.type === "changePitcher") {
+      const { team, playerId } = domainEvent.payload;
+      return { ...ns, pitchers: changePitcher(ns.pitchers, ns.rosters, team, playerId) };
+    }
+    let engineEvent;
+    switch (domainEvent.type) {
+      case "pitch":
+        engineEvent = { kind: "pitch", result: domainEvent.payload.result };
+        break;
+      case "inPlay":
+      case "quickResult":
+        engineEvent = {
+          kind: "inPlay",
+          advances: domainEvent.payload.advances,
+          forceThirdOut: domainEvent.payload.forceThirdOut === true
+        };
+        break;
+      case "steal":
+        engineEvent = { kind: "steal", from: domainEvent.payload.from, result: domainEvent.payload.result };
+        break;
+      case "runnerAdvance":
+        engineEvent = { kind: "runnerAdvance", advances: domainEvent.payload.advances };
+        break;
+      default:
+        return appState;
+    }
+    const newCore = applyEvent(core, engineEvent);
+    ns.core = newCore;
+    const scoredTeam = core.half === "top" ? "away" : "home";
+    const oldRuns = core.half === "top" ? core.awayRuns : core.homeRuns;
+    const newRuns = core.half === "top" ? newCore.awayRuns : newCore.homeRuns;
+    const scored = newRuns - oldRuns;
+    if (scored > 0) {
+      const idx = core.inning - 1;
+      const newLinescore = { ...ns.linescore };
+      while (newLinescore[scoredTeam].length <= idx) newLinescore[scoredTeam].push(0);
+      newLinescore[scoredTeam][idx] += scored;
+      ns.linescore = newLinescore;
+    }
+    let newRunners = { first: null, second: null, third: null };
+    const br = appState.baseRunners;
+    if (domainEvent.type === "inPlay" || domainEvent.type === "quickResult") {
+      const adv = domainEvent.payload.advances;
+      if (adv.batter === "1B") newRunners.first = ns.currentBatterId;
+      else if (adv.batter === "2B") newRunners.second = ns.currentBatterId;
+      else if (adv.batter === "3B") newRunners.third = ns.currentBatterId;
+      for (const base of ["first", "second", "third"]) {
+        if (br[base] !== null) {
+          const target = adv[base];
+          if (target === void 0) newRunners[base] = br[base];
+          else if (target !== "out" && target !== "HOME") newRunners[TARGET_BASE[target]] = br[base];
+        }
+      }
+    } else if (domainEvent.type === "pitch" && (domainEvent.payload.result === "hitByPitch" || domainEvent.payload.result === "ball" && newCore.balls === 0)) {
+      const has1 = br.first !== null;
+      const has2 = br.second !== null;
+      const has3 = br.third !== null;
+      newRunners = { ...br };
+      if (has1 && has2 && has3) {
+        newRunners.third = br.second;
+        newRunners.second = br.first;
+        newRunners.first = ns.currentBatterId;
+      } else if (has1 && has2) {
+        newRunners.third = br.second;
+        newRunners.second = br.first;
+        newRunners.first = ns.currentBatterId;
+      } else if (has1) {
+        newRunners.second = br.first;
+        newRunners.first = ns.currentBatterId;
+      } else {
+        newRunners.first = ns.currentBatterId;
+      }
+    } else if (domainEvent.type === "runnerAdvance") {
+      const adv = domainEvent.payload.advances ?? {};
+      newRunners = { first: null, second: null, third: null };
+      for (const base of ["first", "second", "third"]) {
+        if (br[base] === null) continue;
+        const target = adv[base];
+        if (target === void 0) newRunners[base] = br[base];
+        else if (target !== "out" && target !== "HOME") newRunners[TARGET_BASE[target]] = br[base];
+      }
+    } else if (domainEvent.type === "steal") {
+      newRunners = { ...br };
+      const from = domainEvent.payload.from;
+      if (domainEvent.payload.result === "safe") {
+        if (from === "first") {
+          newRunners.second = br.first;
+          newRunners.first = null;
+        } else if (from === "second") {
+          newRunners.third = br.second;
+          newRunners.second = null;
+        } else if (from === "third") {
+          newRunners.third = null;
+        }
+      } else {
+        newRunners[from] = null;
+      }
+    } else {
+      newRunners = { ...br };
+    }
+    ns.baseRunners = newRunners;
+    let paEnded = false;
+    if (["inPlay", "quickResult"].includes(domainEvent.type)) paEnded = true;
+    else if (domainEvent.type === "pitch") {
+      const r = domainEvent.payload.result;
+      if (r === "hitByPitch") paEnded = true;
+      if (r === "ball" && newCore.balls === 0) paEnded = true;
+      if ((r === "strikeSwinging" || r === "strikeLooking") && newCore.strikes === 0) paEnded = true;
+    }
+    if (paEnded) {
+      const attTeam = core.half === "top" ? "away" : "home";
+      const newOrderIndex = { ...ns.orderIndex };
+      newOrderIndex[attTeam] = (newOrderIndex[attTeam] + 1) % 9;
+      ns.orderIndex = newOrderIndex;
+      ns.paSeq = ns.paSeq + 1;
+      const newAttTeam = newCore.half === "top" ? "away" : "home";
+      ns.currentBatterId = ns.lineup[newAttTeam][ns.orderIndex[newAttTeam]];
+    }
+    if (core.half !== newCore.half) {
+      ns.baseRunners = { first: null, second: null, third: null };
+      if (!paEnded) {
+        ns.paSeq = ns.paSeq + 1;
+        const nextTeam = newCore.half === "top" ? "away" : "home";
+        ns.currentBatterId = ns.lineup[nextTeam][ns.orderIndex[nextTeam]];
+      }
+    }
+    if (newCore.inning > ns.innings && newCore.half === "top") {
+      ns.finished = true;
+    }
+    if (newCore.half === "bottom" && newCore.inning >= ns.innings && newCore.homeRuns > newCore.awayRuns) {
+      ns.finished = true;
+    }
+    return ns;
+  }
+
+  // src/actions.js
+  function availableActions(appState) {
+    const baseRunners = appState.baseRunners || {};
+    const runners = { first: baseRunners.first, second: baseRunners.second, third: baseRunners.third };
+    if (appState.currentBatterId === null || appState.finished) {
+      return {
+        pitches: [],
+        inPlay: false,
+        steals: [],
+        batterTargets: [],
+        runnerTargets: {},
+        runners
+      };
+    }
+    const pitches = ["ball", "strikeLooking", "strikeSwinging", "foul"];
+    const inPlay = true;
+    const batterTargets = ["out", "1B", "2B", "3B", "HOME"];
+    const steals = [];
+    if (baseRunners.first && !baseRunners.second) {
+      steals.push({ from: "first", runnerId: baseRunners.first, label: "一塁走者の盗塁" });
+    }
+    if (baseRunners.second && !baseRunners.third) {
+      steals.push({ from: "second", runnerId: baseRunners.second, label: "二塁走者の盗塁" });
+    }
+    if (baseRunners.third) {
+      steals.push({ from: "third", runnerId: baseRunners.third, label: "三塁走者の盗塁" });
+    }
+    const runnerTargets = {};
+    if (baseRunners.first) {
+      runnerTargets.first = ["1B", "2B", "3B", "HOME", "out"];
+    }
+    if (baseRunners.second) {
+      runnerTargets.second = ["2B", "3B", "HOME", "out"];
+    }
+    if (baseRunners.third) {
+      runnerTargets.third = ["3B", "HOME", "out"];
+    }
+    return {
+      pitches,
+      inPlay,
+      steals,
+      batterTargets,
+      runnerTargets,
+      runners
+    };
+  }
+
+  // src/stats.js
+  var HIT_KIND = { single: null, double: "d2", triple: "d3", homerun: "hr" };
+  var BASES = ["first", "second", "third"];
+  var STRIKE_RESULTS = /* @__PURE__ */ new Set(["strikeSwinging", "strikeLooking"]);
+  var NON_AB_PLAYS = /* @__PURE__ */ new Set(["catcherInterference", "obstruction"]);
+  var emptyBatter = (p) => ({
+    playerId: p.id,
+    name: p.name,
+    number: p.number,
+    order: p.order,
+    pa: 0,
+    ab: 0,
+    h: 0,
+    d2: 0,
+    d3: 0,
+    hr: 0,
+    rbi: 0,
+    r: 0,
+    bb: 0,
+    hbp: 0,
+    so: 0,
+    avg: 0
+  });
+  function outsDelta(prevCore, nextCore) {
+    if (prevCore.half !== nextCore.half) return 3 - prevCore.outs;
+    return nextCore.outs - prevCore.outs;
+  }
+  function scorersOf(prev, ev, next) {
+    const out = [];
+    const adv = ev.payload?.advances;
+    if (ev.type === "inPlay" || ev.type === "quickResult") {
+      if (adv?.batter === "HOME") out.push(prev.currentBatterId);
+      for (const k of BASES) if (adv?.[k] === "HOME" && prev.baseRunners[k]) out.push(prev.baseRunners[k]);
+      return out;
+    }
+    if (ev.type === "runnerAdvance") {
+      for (const k of BASES) if (ev.payload?.advances?.[k] === "HOME" && prev.baseRunners[k]) out.push(prev.baseRunners[k]);
+      return out;
+    }
+    if (ev.type === "pitch" && (ev.payload?.result === "hitByPitch" || ev.payload?.result === "ball" && next.core.balls === 0)) {
+      const b = prev.core.bases;
+      if (b.first && b.second && b.third && prev.baseRunners.third) out.push(prev.baseRunners.third);
+      return out;
+    }
+    if (ev.type === "steal" && ev.payload?.from === "third" && ev.payload?.result === "safe") {
+      if (prev.baseRunners.third) out.push(prev.baseRunners.third);
+    }
+    return out;
+  }
+  function rbiOf(ev, prev, next) {
+    if (ev.payload?.playType === "error") return 0;
+    const adv = ev.payload?.advances;
+    if (ev.type === "inPlay" || ev.type === "quickResult") {
+      let n = adv?.batter === "HOME" ? 1 : 0;
+      for (const k of BASES) if (adv?.[k] === "HOME") n += 1;
+      return n;
+    }
+    if (ev.type === "pitch" && (ev.payload?.result === "hitByPitch" || ev.payload?.result === "ball" && next.core.balls === 0)) {
+      const b = prev.core.bases;
+      return b.first && b.second && b.third ? 1 : 0;
+    }
+    return 0;
+  }
+  function boxScore(domainEvents, rosters) {
+    const rows = /* @__PURE__ */ new Map();
+    const rowOf = (id) => {
+      if (!rows.has(id)) {
+        const p = playerById(rosters, id) ?? { id, name: "", number: 0, order: 0 };
+        rows.set(id, emptyBatter(p));
+      }
+      return rows.get(id);
+    };
+    const pitchRowsByTeam = { away: /* @__PURE__ */ new Map(), home: /* @__PURE__ */ new Map() };
+    const pitcherOf = (team, id) => {
+      const m = pitchRowsByTeam[team];
+      if (!m.has(id)) {
+        const p = playerById(rosters, id) ?? { id, name: "" };
+        m.set(id, {
+          playerId: id,
+          name: p.name ?? "",
+          pitches: 0,
+          battersFaced: 0,
+          h: 0,
+          bb: 0,
+          hbp: 0,
+          so: 0,
+          r: 0,
+          outs: 0,
+          ip: "0.0"
+        });
+      }
+      return m.get(id);
+    };
+    const appearances = { away: [], home: [] };
+    let state = initialAppState(rosters);
+    for (const t of ["away", "home"]) state.lineup[t].forEach((id, slot) => appearances[t].push({ slot, id }));
+    for (const t of ["away", "home"]) pitcherOf(t, state.pitchers[t]);
+    for (const ev of domainEvents) {
+      const prev = state;
+      state = appReducer(prev, ev);
+      for (const t of ["away", "home"]) {
+        for (let i = 0; i < 9; i += 1) {
+          if (prev.lineup[t][i] !== state.lineup[t][i]) appearances[t].push({ slot: i, id: state.lineup[t][i] });
+        }
+        if (prev.pitchers[t] !== state.pitchers[t]) pitcherOf(t, state.pitchers[t]);
+      }
+      if (ev.type === "gameStart" || ev.type === "substitute" || ev.type === "changePitcher") continue;
+      const off = prev.core.half === "top" ? "away" : "home";
+      const def = off === "away" ? "home" : "away";
+      const pit = pitcherOf(def, prev.pitchers[def]);
+      const pt = ev.payload?.playType;
+      if (ev.type === "pitch") pit.pitches += 1;
+      if (ev.type === "quickResult") pit.pitches += ev.payload?.pitchCount ?? 0;
+      pit.outs += outsDelta(prev.core, state.core);
+      const runDelta = off === "away" ? state.core.awayRuns - prev.core.awayRuns : state.core.homeRuns - prev.core.homeRuns;
+      pit.r += runDelta;
+      if (runDelta > 0) {
+        for (const id of scorersOf(prev, ev, state)) {
+          const r = rows.get(id) ?? rowOf(id);
+          r.r += 1;
+        }
+      }
+      const isHbp = ev.type === "pitch" && ev.payload?.result === "hitByPitch" || pt === "hitByPitch";
+      const isWalk = ev.type === "pitch" && ev.payload?.result === "ball" && state.core.balls === 0 || pt === "walk";
+      const isSO = ev.type === "pitch" && STRIKE_RESULTS.has(ev.payload?.result) && state.core.strikes === 0 || pt === "strikeout" || pt === "uncaughtThirdStrike";
+      const paEnded = ev.type === "inPlay" || ev.type === "quickResult" || isWalk || isSO || isHbp;
+      if (paEnded && prev.currentBatterId) {
+        const b = rowOf(prev.currentBatterId);
+        b.pa += 1;
+        pit.battersFaced += 1;
+        const noAtBat = isWalk || isHbp || pt === "sacFly" || pt === "sacBunt" || NON_AB_PLAYS.has(pt);
+        if (!noAtBat) b.ab += 1;
+        if (pt in HIT_KIND) {
+          b.h += 1;
+          pit.h += 1;
+          const long = HIT_KIND[pt];
+          if (long) b[long] += 1;
+        }
+        if (isWalk) {
+          b.bb += 1;
+          pit.bb += 1;
+        }
+        if (isHbp) {
+          b.hbp += 1;
+          pit.hbp += 1;
+        }
+        if (isSO) {
+          b.so += 1;
+          pit.so += 1;
+        }
+        b.rbi += runDelta > 0 ? rbiOf(ev, prev, state) : 0;
+      }
+    }
+    const battersOf = (t) => {
+      const seen = /* @__PURE__ */ new Set();
+      const out = [];
+      for (let slot = 0; slot < 9; slot += 1) {
+        for (const ap of appearances[t]) {
+          if (ap.slot !== slot || seen.has(ap.id)) continue;
+          seen.add(ap.id);
+          const r = rows.get(ap.id) ?? rowOf(ap.id);
+          out.push({ ...r, order: slot + 1, avg: r.ab > 0 ? r.h / r.ab : 0 });
+        }
+      }
+      return out;
+    };
+    const pitchersOf = (t) => [...pitchRowsByTeam[t].values()].filter((p, i) => i === 0 || p.pitches > 0 || p.battersFaced > 0 || p.outs > 0).map((p) => ({ ...p, ip: `${Math.floor(p.outs / 3)}.${p.outs % 3}` }));
+    const teamRuns = { away: state.core.awayRuns, home: state.core.homeRuns };
+    const hitsOf = (t) => battersOf(t).reduce((a, b) => a + b.h, 0);
+    return {
+      linescore: state.linescore,
+      totals: {
+        away: { runs: teamRuns.away, hits: hitsOf("away"), errors: 0 },
+        home: { runs: teamRuns.home, hits: hitsOf("home"), errors: 0 }
+      },
+      away: { batters: battersOf("away"), pitchers: pitchersOf("away") },
+      home: { batters: battersOf("home"), pitchers: pitchersOf("home") }
+    };
+  }
+
+  // src/recap.js
+  function templateRecap(box, rosters) {
+    const awayTeam = rosters.away.name;
+    const homeTeam = rosters.home.name;
+    const aRuns = box.totals.away.runs;
+    const hRuns = box.totals.home.runs;
+    let resultText = "";
+    if (aRuns > hRuns) resultText = `${awayTeam}の勝利`;
+    else if (hRuns > aRuns) resultText = `${homeTeam}の勝利`;
+    else resultText = "引き分け";
+    const maxInnings = Math.max(box.linescore.away.length, box.linescore.home.length);
+    let flowParts = [];
+    for (let i = 0; i < maxInnings; i++) {
+      const a = box.linescore.away[i] || 0;
+      const h = box.linescore.home[i] || 0;
+      if (a > 0) flowParts.push(`${i + 1}回表${a}`);
+      if (h > 0) flowParts.push(`${i + 1}回裏${h}`);
+    }
+    const flowText = flowParts.length ? `得点の流れは、${flowParts.join("、")}でした。` : "両軍とも得点はありませんでした。";
+    const allBatters = [
+      ...box.away.batters.map((b) => ({ ...b, team: awayTeam })),
+      ...box.home.batters.map((b) => ({ ...b, team: homeTeam }))
+    ];
+    let playerText = "";
+    const maxH = Math.max(...allBatters.map((b) => b.h || 0));
+    if (maxH > 0) {
+      const tops = allBatters.filter((b) => b.h === maxH).sort((a, b) => a.order - b.order);
+      const best = tops[0];
+      const rbiPart = best.rbi > 0 ? `（${best.rbi}打点）` : "";
+      playerText = `${best.team}の${best.name}選手が最多の${maxH}安打${rbiPart}を記録しました。`;
+    } else {
+      const maxRbi = Math.max(...allBatters.map((b) => b.rbi || 0));
+      const tops = allBatters.filter((b) => b.rbi === maxRbi).sort((a, b) => a.order - b.order);
+      playerText = maxRbi > 0 ? `${tops[0].team}の${tops[0].name}選手が最多の${maxRbi}打点をマークしました。` : "両チームとも安打が出ず、投手戦となりました。";
+    }
+    const awayPit = box.away.pitchers[0];
+    const homePit = box.home.pitchers[0];
+    let pitText = "";
+    if (awayPit) pitText += `${awayTeam}先発${awayPit.name}投手は投球数${awayPit.pitches}、奪三振${awayPit.so}でした。`;
+    if (homePit) pitText += ` ${homeTeam}先発${homePit.name}投手は投球数${homePit.pitches}、奪三振${homePit.so}でした。`;
+    const margin = Math.abs(aRuns - hRuns);
+    const toneText = margin === 0 ? "最後まで決着がつかず、両チームが持ち味を出し合う展開となりました。" : margin === 1 ? "1点を争う緊迫した展開が続き、最後まで目の離せない試合となりました。" : margin <= 3 ? "一方に大きく傾かない展開が続き、終盤まで結果の分からない試合となりました。" : "得点が集まったイニングが試合の流れを大きく動かしました。";
+    const p1 = `試合結果は${awayTeam} ${aRuns} - ${hRuns} ${homeTeam}、${resultText}となりました。イニングごとの${flowText}${toneText}`;
+    const p2 = `打撃では${playerText}走者を置いた場面での落ち着いた打席が目を引きました。両チームとも最後まで打席で集中を切らさず、次の打者へつなぐ意識が見えた試合でした。`;
+    const p3 = pitText ? `投手では${pitText}球数を重ねながらも粘り強く腕を振り続けた両先発の投球が、試合の土台になりました。応援ありがとうございました。次戦もどうぞご期待ください。` : "";
+    return [p1, p2, p3].filter(Boolean).join("\n\n");
+  }
+  function recapPrompt(box, rosters) {
+    const awayTeam = rosters.away.name;
+    const homeTeam = rosters.home.name;
+    const boxData = JSON.stringify(box);
+    return `あなたは中学野球の保護者向けに読み物として戦評を書くライターです。
+以下の集計値を基に、チーム名「${awayTeam}」と「${homeTeam}」を使用して記事を作成してください。
+
+【制約事項】
+- 文字数は500字程度に収めてください。
+- JSONに無い数値・スコアを書いてはならない。数値はすべて与えられた集計値から引くこと。
+- 選手名や得点状況は提供されたデータのみを使用し、創作しないこと。
+
+【集計値】
+${boxData}
+
+【出力形式】
+段落2〜3個で構成し、保護者が読んで嬉しい調子で書いてください。`;
+  }
+
+  // src/metrics.js
+  function newLog() {
+    return { taps: [] };
+  }
+  function recordTap(log, tap) {
+    return { ...log, taps: [...log.taps || [], tap] };
+  }
+  function paRows(log, paMetas) {
+    const metas = paMetas || [];
+    const tapsBySeq = /* @__PURE__ */ new Map();
+    for (const tap of log.taps || []) {
+      if (!tapsBySeq.has(tap.paSeq)) tapsBySeq.set(tap.paSeq, []);
+      tapsBySeq.get(tap.paSeq).push(tap);
+    }
+    return metas.map((meta) => {
+      const seqTaps = tapsBySeq.get(meta.paSeq) || [];
+      const tapCount = seqTaps.length;
+      let elapsedSec = 0;
+      if (tapCount > 1) {
+        let minT = Infinity, maxT = -Infinity;
+        for (const t of seqTaps) {
+          if (t.t < minT) minT = t.t;
+          if (t.t > maxT) maxT = t.t;
+        }
+        elapsedSec = (maxT - minT) / 1e3;
+      }
+      const undoCount = seqTaps.filter((t) => t.action === "undo").length;
+      return { ...meta, tapCount, elapsedSec, undoCount };
+    });
+  }
+  function summarize(rows) {
+    const paCount = (rows || []).length;
+    if (paCount === 0) {
+      return {
+        totalElapsedSec: 0,
+        paCount: 0,
+        pitchModeRate: 0,
+        tapsPerPaMedian: 0,
+        tapsPerPaMax: 0,
+        undoTotal: 0,
+        pitchInputTotal: 0
+      };
+    }
+    const tapCounts = rows.map((r) => r.tapCount);
+    const sortedTaps = [...tapCounts].sort((a, b) => a - b);
+    const mid = Math.floor(sortedTaps.length / 2);
+    const tapsPerPaMedian = sortedTaps.length % 2 === 0 ? (sortedTaps[mid - 1] + sortedTaps[mid]) / 2 : sortedTaps[mid];
+    const pitchModeRate = rows.filter((r) => r.mode === "pitch").length / paCount;
+    return {
+      totalElapsedSec: rows.reduce((sum, r) => sum + (r.elapsedSec || 0), 0),
+      paCount,
+      pitchModeRate,
+      tapsPerPaMedian,
+      tapsPerPaMax: Math.max(...tapCounts),
+      undoTotal: rows.reduce((sum, r) => sum + (r.undoCount || 0), 0),
+      pitchInputTotal: rows.reduce((sum, r) => sum + (r.pitchCount || 0), 0)
+    };
+  }
+  function toCsv(rows, summary) {
+    const header = "scorerId,gameId,paSeq,inning,half,battingTeam,batterId,batterName,mode,pitchCount,tapCount,elapsedSec,undoCount,resultPlayType,outsAfter,runsScored";
+    const escape = (val) => {
+      const s = String(val);
+      return /[,"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [header];
+    for (const row of rows || []) {
+      lines.push([
+        row.scorerId ?? "",
+        row.gameId,
+        row.paSeq,
+        row.inning,
+        row.half,
+        row.battingTeam,
+        row.batterId,
+        row.batterName,
+        row.mode,
+        row.pitchCount,
+        row.tapCount,
+        row.elapsedSec,
+        row.undoCount,
+        row.resultPlayType,
+        row.outsAfter,
+        row.runsScored
+      ].map(escape).join(","));
+    }
+    lines.push("");
+    for (const [key, value] of Object.entries(summary || {})) {
+      lines.push(`${escape(key)},${escape(value)}`);
+    }
+    return lines.join("\n");
+  }
+
+  // src/advances.js
+  var BASES2 = ["first", "second", "third"];
+  var NEXT_BASE = { first: "2B", second: "3B", third: "HOME" };
+  function defaultAdvances(playType, runners) {
+    const step = { single: 1, double: 2, triple: 3, error: 1 }[playType] ?? 0;
+    const adv = {};
+    adv.batter = {
+      single: "1B",
+      double: "2B",
+      triple: "3B",
+      homerun: "HOME",
+      error: "1B",
+      fieldersChoice: "1B",
+      walk: "1B",
+      // 振り逃げ・打撃妨害・走塁妨害はいずれも打者が一塁を得る
+      uncaughtThirdStrike: "1B",
+      catcherInterference: "1B",
+      obstruction: "1B"
+    }[playType] ?? "out";
+    const order = { first: 1, second: 2, third: 3 };
+    for (const b of BASES2) {
+      if (!runners[b]) continue;
+      if (playType === "homerun") adv[b] = "HOME";
+      else if (playType === "sacFly" || playType === "sacBunt") adv[b] = b === "third" ? "HOME" : NEXT_BASE[b];
+      else if (playType === "doublePlay" && b === "first") adv[b] = "out";
+      else if (playType === "fieldersChoice" && b === "first") adv[b] = "out";
+      else if (playType === "walk") adv[b] = void 0;
+      else if (step > 0) {
+        const to = order[b] + step;
+        adv[b] = to >= 4 ? "HOME" : `${to}B`;
+      }
+    }
+    if (playType === "walk" || playType === "catcherInterference") {
+      if (runners.first) adv.first = "2B";
+      if (runners.first && runners.second) adv.second = "3B";
+      if (runners.first && runners.second && runners.third) adv.third = "HOME";
+    }
+    for (const k of Object.keys(adv)) if (adv[k] === void 0) delete adv[k];
+    return adv;
+  }
+
+  // src/palette.js
+  var RESULT_PALETTE = [
+    { key: "single", label: "単打", group: "hit" },
+    { key: "double", label: "二塁打", group: "hit" },
+    { key: "triple", label: "三塁打", group: "hit" },
+    { key: "homerun", label: "ホームラン", group: "hit" },
+    { key: "groundOut", label: "ゴロアウト", group: "out" },
+    { key: "flyOut", label: "飛球アウト", group: "out" },
+    { key: "strikeout", label: "三振", group: "out" },
+    { key: "sacFly", label: "犠飛", group: "out" },
+    { key: "doublePlay", label: "併殺", group: "out" },
+    { key: "sacBunt", label: "犠打", group: "out" },
+    { key: "walk", label: "四球", group: "other" },
+    { key: "uncaughtThirdStrike", label: "振り逃げ", group: "other" },
+    { key: "catcherInterference", label: "打撃妨害", group: "other" },
+    { key: "obstruction", label: "走塁妨害", group: "other" },
+    { key: "error", label: "失策", group: "other" },
+    { key: "other", label: "その他", group: "other" }
+  ];
+  function quickCommitPlan(appState, playType) {
+    const advances = defaultAdvances(playType, appState.baseRunners);
+    if (!appState.currentBatterId || appState.finished) {
+      return { ok: false, advances, reason: "現在バッターが選択されていないか、試合が終了しています" };
+    }
+    try {
+      appReducer(appState, { type: "inPlay", payload: { playType, advances } });
+      return { ok: true, advances };
+    } catch (error) {
+      return { ok: false, advances, reason: error.message };
+    }
+  }
+  function isPaletteEnabled(appState, playType) {
+    if (!appState?.currentBatterId || appState.finished) return false;
+    const r = appState.baseRunners ?? {};
+    if (playType === "doublePlay") return !!r.first;
+    if (playType === "sacFly") return !!r.third;
+    if (playType === "sacBunt") return !!(r.first || r.second || r.third);
+    return true;
+  }
+
+  // src/zone.js
+  function isValid(col, row) {
+    return col >= 0 && col <= 4 && row >= 0 && row <= 4;
+  }
+  function cellId(col, row) {
+    return `c${col}r${row}`;
+  }
+  function isStrikeCell(col, row) {
+    if (!isValid(col, row)) return false;
+    return col >= 1 && col <= 3 && row >= 1 && row <= 3;
+  }
+  function zone9(col, row) {
+    if (isStrikeCell(col, row)) {
+      return (row - 1) * 3 + (col - 1) + 1;
+    }
+    return null;
+  }
+  function cellLabel(col, row) {
+    if (!isValid(col, row)) return "外れ(範囲外)";
+    if (isStrikeCell(col, row)) {
+      const heights = ["", "高め", "真ん中", "低め", ""];
+      const widths = ["右", "右", "中", "左", "左"];
+      return `${heights[row]}-${widths[col]}`;
+    }
+    const dirs = [];
+    if (row === 0) dirs.push("上");
+    if (row === 4) dirs.push("下");
+    if (col === 0) dirs.push("右");
+    if (col === 4) dirs.push("左");
+    return `外れ(${dirs.join("-")})`;
+  }
+  function resultFor(col, row, swing = "looking") {
+    if (swing === "foul") return "foul";
+    if (swing === "swinging") return "strikeSwinging";
+    return isStrikeCell(col, row) ? "strikeLooking" : "ball";
+  }
+  function cells() {
+    const result = [];
+    for (let r = 0; r <= 4; r++) {
+      for (let c = 0; c <= 4; c++) {
+        result.push({
+          col: c,
+          row: r,
+          id: cellId(c, r),
+          strike: isStrikeCell(c, r),
+          zone9: zone9(c, r),
+          label: cellLabel(c, r)
+        });
+      }
+    }
+    return result;
+  }
+
+  // src/pitchlog.js
+  function pitchRows(domainEvents, rosters, gameId, scorerId = "") {
+    let state = initialAppState(rosters);
+    const rows = [];
+    let lastPaSeq = void 0;
+    let pitchNo = 0;
+    for (const event of domainEvents) {
+      if (event.type === "pitch") {
+        const prePaSeq = state.paSeq;
+        const preInning = state.core.inning;
+        const preHalf = state.core.half;
+        const preBatterId = state.currentBatterId;
+        if (prePaSeq !== lastPaSeq) {
+          lastPaSeq = prePaSeq;
+          pitchNo = 1;
+        } else {
+          pitchNo++;
+        }
+        const battingTeam = rosters[preHalf === "top" ? "away" : "home"].teamId;
+        const batterName = rosters?.away?.players?.find((p) => p.id === preBatterId)?.name || rosters?.home?.players?.find((p) => p.id === preBatterId)?.name || "";
+        const result = event.payload?.result ?? "";
+        const swing = event.payload?.swing ?? "";
+        const pitchType = event.payload?.pitchType ?? "";
+        const zone = event.payload?.zone ?? "";
+        const zone92 = event.payload?.zone9 ?? "";
+        let zoneLabel = "";
+        if (typeof zone === "string" && /^c(\d+)r(\d+)$/.test(zone)) {
+          const [, col, row2] = zone.match(/^c(\d+)r(\d+)$/);
+          zoneLabel = cellLabel(Number(col), Number(row2));
+        }
+        const row = {
+          scorerId,
+          gameId,
+          paSeq: prePaSeq,
+          pitchNo,
+          inning: preInning,
+          half: preHalf,
+          battingTeam,
+          batterId: preBatterId,
+          batterName,
+          result,
+          swing,
+          pitchType,
+          zone,
+          zone9: zone92,
+          zoneLabel,
+          ballsAfter: 0,
+          strikesAfter: 0
+        };
+        state = appReducer(state, event);
+        row.ballsAfter = state.core.balls;
+        row.strikesAfter = state.core.strikes;
+        rows.push(row);
+      } else {
+        state = appReducer(state, event);
+      }
+    }
+    return rows;
+  }
+  function toPitchCsv(rows) {
+    const escape = (val) => {
+      const str = String(val);
+      if (/[,"\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+      return str;
+    };
+    const header = "scorerId,gameId,paSeq,pitchNo,inning,half,battingTeam,batterId,batterName,result,swing,pitchType,zone,zone9,zoneLabel,ballsAfter,strikesAfter";
+    const bodyRows = rows.map((r) => [
+      r.scorerId,
+      r.gameId,
+      r.paSeq,
+      r.pitchNo,
+      r.inning,
+      r.half,
+      r.battingTeam,
+      r.batterId,
+      r.batterName,
+      r.result,
+      r.swing,
+      r.pitchType,
+      r.zone,
+      r.zone9,
+      r.zoneLabel,
+      r.ballsAfter,
+      r.strikesAfter
+    ].map(escape).join(","));
+    return [header, ...bodyRows].join("\n");
+  }
+
+  // src/battedball.js
+  var STRENGTH = [
+    { key: "veryFast", label: "非常に速い" },
+    { key: "fast", label: "速い" },
+    { key: "normal", label: "普通" },
+    { key: "slow", label: "遅い" },
+    { key: "verySlow", label: "非常に遅い" }
+  ];
+  var TRAJECTORY = [
+    { key: "ground", label: "ゴロ" },
+    { key: "lowLine", label: "低いライナー" },
+    { key: "line", label: "ライナー" },
+    { key: "lowFly", label: "低いフライ" },
+    { key: "fly", label: "フライ" },
+    { key: "highFly", label: "高いフライ" }
+  ];
+  var DIRECTION = [
+    { key: "leftLine", label: "左翼線" },
+    { key: "left", label: "レフト" },
+    { key: "leftCenter", label: "左中間" },
+    { key: "center", label: "センター" },
+    { key: "rightCenter", label: "右中間" },
+    { key: "right", label: "ライト" },
+    { key: "rightLine", label: "右翼線" }
+  ];
+  var DEPTH = [
+    { key: "shallow", label: "浅い" },
+    { key: "normal", label: "普通" },
+    { key: "deep", label: "深い" }
+  ];
+  var FIELD_PLAY = [
+    { key: "normal", label: "普通に処理" },
+    { key: "goodPlay", label: "好プレー" },
+    { key: "veryHard", label: "非常に難しい打球を処理" },
+    { key: "close", label: "惜しい" },
+    { key: "touchedMissed", label: "触れたが取れない" },
+    { key: "caughtMissed", label: "追いついたが取れない" },
+    { key: "couldntReach", label: "全く追いつけない" }
+  ];
+  var CATCH_STYLE = [
+    { key: "front", label: "正面" },
+    { key: "backhand", label: "バックハンド" },
+    { key: "running", label: "走りながら" },
+    { key: "diving", label: "ダイビング" }
+  ];
+  var THROW_QUALITY = [
+    { key: "accurate", label: "正確" },
+    { key: "fast", label: "速い" },
+    { key: "slow", label: "遅い" },
+    { key: "offTarget", label: "逸れた" }
+  ];
+  var TAG_FIELDS = ["strength", "trajectory", "direction", "depth", "fieldPlay", "catchStyle", "throwQuality"];
+  var FIELD_TO_CONSTANT = {
+    strength: STRENGTH,
+    trajectory: TRAJECTORY,
+    direction: DIRECTION,
+    depth: DEPTH,
+    fieldPlay: FIELD_PLAY,
+    catchStyle: CATCH_STYLE,
+    throwQuality: THROW_QUALITY
+  };
+  function normalizeTags(input) {
+    if (typeof input !== "object" || input === null) return {};
+    const result = {};
+    for (const field of TAG_FIELDS) {
+      const value = input[field];
+      if (value === void 0) continue;
+      const constant = FIELD_TO_CONSTANT[field];
+      if (constant.some((item) => item.key === value)) {
+        result[field] = value;
+      }
+    }
+    return result;
+  }
+
+  // src/tagstats.js
+  var NON_BATTED = /* @__PURE__ */ new Set(["strikeout", "walk"]);
+  function collect(domainEvents, rosters) {
+    const players = [...rosters.away.players, ...rosters.home.players];
+    const nameOf = (id) => players.find((p) => p.id === id)?.name ?? "";
+    const batted = [];
+    const tags = /* @__PURE__ */ new Map();
+    let s = initialAppState(rosters);
+    for (const ev of domainEvents) {
+      if (ev?.type === "tag") {
+        const seq = ev.payload?.paSeq;
+        if (seq !== void 0) tags.set(seq, { ...tags.get(seq) ?? {}, ...normalizeTags(ev.payload) });
+        continue;
+      }
+      const prev = s;
+      s = appReducer(prev, ev);
+      if (ev.type === "gameStart") continue;
+      const isBatted = (ev.type === "inPlay" || ev.type === "quickResult") && !NON_BATTED.has(ev.payload?.playType);
+      if (!isBatted) continue;
+      const off = prev.core.half === "top" ? "away" : "home";
+      batted.push({
+        paSeq: prev.paSeq,
+        inning: prev.core.inning,
+        half: prev.core.half,
+        battingTeam: rosters[off].teamId,
+        batterId: prev.currentBatterId,
+        batterName: nameOf(prev.currentBatterId),
+        playType: ev.payload.playType
+      });
+    }
+    return { batted, tags };
+  }
+  function tagFillRate(domainEvents, rosters) {
+    const { batted, tags } = collect(domainEvents, rosters);
+    const n = batted.length;
+    const byField = {};
+    for (const f of TAG_FIELDS) byField[f] = 0;
+    let tagged = 0;
+    for (const b of batted) {
+      const t = tags.get(b.paSeq);
+      if (!t || Object.keys(t).length === 0) continue;
+      tagged += 1;
+      for (const f of TAG_FIELDS) if (t[f] !== void 0) byField[f] += 1;
+    }
+    for (const f of TAG_FIELDS) byField[f] = n > 0 ? byField[f] / n : 0;
+    return { battedBalls: n, tagged, fillRate: n > 0 ? tagged / n : 0, byField };
+  }
+  function tagRows(domainEvents, rosters, gameId, scorerId = "") {
+    const { batted, tags } = collect(domainEvents, rosters);
+    return batted.map((b) => {
+      const t = tags.get(b.paSeq) ?? {};
+      const row = { scorerId, gameId, ...b };
+      for (const f of TAG_FIELDS) row[f] = t[f] ?? "";
+      return row;
+    });
+  }
+  var COLUMNS = ["scorerId", "gameId", "paSeq", "inning", "half", "battingTeam", "batterId", "batterName", "playType", ...TAG_FIELDS];
+  var esc = (v) => {
+    const s = v === void 0 || v === null ? "" : String(v);
+    return /[,"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  function toTagCsv(rows) {
+    return [COLUMNS.join(","), ...rows.map((r) => COLUMNS.map((c) => esc(r[c])).join(","))].join("\n");
+  }
+
+  // src/audiostore.js
+  var DB_NAME = "a4l-audio";
+  var STORE = "clips";
+  var isSupported = () => typeof indexedDB !== "undefined" && typeof MediaRecorder !== "undefined" && typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+  var open = () => new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("この端末では保存できません"));
+      return;
+    }
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        const os = db.createObjectStore(STORE, { keyPath: "id", autoIncrement: true });
+        os.createIndex("gameId", "gameId");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error("保存領域を開けません"));
+  });
+  var tx = async (mode, fn) => {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(STORE, mode);
+      const store = t.objectStore(STORE);
+      let out;
+      try {
+        out = fn(store);
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      t.oncomplete = () => resolve(out?.result ?? out);
+      t.onerror = () => reject(t.error);
+    });
+  };
+  async function saveClip({ gameId, paSeq, inning, half, blob, mime, durationMs }) {
+    return tx("readwrite", (store) => store.add({
+      gameId,
+      paSeq: paSeq ?? null,
+      inning: inning ?? null,
+      half: half ?? null,
+      blob,
+      mime: mime ?? blob?.type ?? "audio/webm",
+      durationMs: durationMs ?? null,
+      at: Date.now()
+    }));
+  }
+  async function listClips(gameId) {
+    const all = await tx("readonly", (store) => store.getAll());
+    const rows = Array.isArray(all) ? all : [];
+    return rows.filter((r) => !gameId || r.gameId === gameId).sort((a, b) => b.at - a.at);
+  }
+  async function deleteClip(id) {
+    return tx("readwrite", (store) => store.delete(id));
+  }
+  function clipFileName(clip) {
+    const d = new Date(clip.at ?? Date.now());
+    const p = (n) => String(n).padStart(2, "0");
+    const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    const ext = (clip.mime ?? "").includes("mp4") ? "m4a" : "webm";
+    return `a4l-voice-${clip.gameId ?? "game"}-pa${clip.paSeq ?? 0}-${stamp}.${ext}`;
+  }
+
+  // src/roster.js
+  function parseRoster(text) {
+    if (!text || !/\S/.test(text)) return { players: [], errors: [] };
+    const lines = text.split("\n");
+    const players = [];
+    const errors = [];
+    const seenNames = /* @__PURE__ */ new Set();
+    const seenNumbers = /* @__PURE__ */ new Set();
+    let autoNum = 1;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const normalized = line.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 65248)).replace(/\u3000/g, " ");
+      const trimmed = normalized.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const parts = trimmed.split(/[,\t\s]+/).filter(Boolean);
+      let num = null;
+      let name = "";
+      let isPitcher = false;
+      if (parts.length > 0 && /^\d+$/.test(parts[0])) {
+        num = Number(parts[0]);
+        name = parts[1] || "";
+        if (parts.length > 2) {
+          isPitcher = parts.slice(2).some((p) => p.includes("投"));
+        }
+      } else {
+        num = autoNum++;
+        name = parts[0] || "";
+      }
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        errors.push(`${i + 1}行目: 氏名が空です`);
+      }
+      if (seenNames.has(trimmedName)) {
+        errors.push(`重複した氏名が見つかりました: ${trimmedName}`);
+      } else {
+        seenNames.add(trimmedName);
+      }
+      if (num !== null && seenNumbers.has(num)) {
+        errors.push(`重複した背番号が見つかりました: ${num}`);
+      } else if (num !== null) {
+        seenNumbers.add(num);
+      }
+      players.push({ number: num, name: trimmedName, isPitcher: Boolean(isPitcher) });
+    }
+    return { players, errors };
+  }
+  function buildTeam(teamId, teamName, parsed, opts = {}) {
+    if (!parsed?.players || parsed.players.length < 9) return null;
+    const starters = parsed.players.slice(0, 9);
+    const benchList = parsed.players.slice(9);
+    const prefix = opts?.idPrefix ?? (teamId === "AWAY" ? "a" : "h");
+    const benchPrefix = opts?.idPrefix ? `${opts.idPrefix}b` : teamId === "AWAY" ? "ab" : "hb";
+    const players = starters.map((p, idx) => ({
+      id: `${prefix}${idx + 1}`,
+      name: p.name,
+      number: p.number,
+      order: idx + 1
+    }));
+    const bench = benchList.map((p, idx) => ({
+      id: `${benchPrefix}${idx + 1}`,
+      name: p.name,
+      number: p.number
+    }));
+    let pitcherId = opts.pitcherId || null;
+    if (!pitcherId) {
+      const pitcher = starters.find((p) => p.isPitcher === true);
+      if (pitcher) {
+        pitcherId = `${prefix}${starters.indexOf(pitcher) + 1}`;
+      } else {
+        pitcherId = players[0].id;
+      }
+    }
+    return { teamId, name: teamName, players, bench, pitcherId };
+  }
+  function teamToText(team) {
+    const formatLine = (p) => `${p.number} ${p.name}`;
+    return [...team.players, ...team.bench].map(formatLine).join("\n");
+  }
+
+  // src/ui.js
+  var PITCH_LABEL = {
+    ball: "ボール",
+    strikeLooking: "見逃しS",
+    strikeSwinging: "空振りS",
+    foul: "ファウル",
+    hitByPitch: "死球"
+  };
+  var PITCH_SHORT = { ball: "B", strikeLooking: "S", strikeSwinging: "空", foul: "F", hitByPitch: "死" };
+  var RUNNER_EVENTS = [
+    ["wildPitch", "暴投で進塁"],
+    ["passedBall", "捕逸で進塁"],
+    ["balk", "ボーク"],
+    ["pickoff", "牽制死"],
+    ["rundown", "挟殺でアウト"],
+    ["otherAdvance", "その他の進塁・走塁死"]
+  ];
+  var RUNNER_EVENT_LABEL = Object.fromEntries(RUNNER_EVENTS);
+  var AUTO_ADVANCE_REASONS = /* @__PURE__ */ new Set(["wildPitch", "passedBall", "balk"]);
+  var SWINGS = [["looking", "見逃し"], ["swinging", "空振り"], ["foul", "ファウル"]];
+  var PITCH_TYPES = [
+    ["", "未記録"],
+    ["straight", "ストレート"],
+    ["curve", "カーブ"],
+    ["slider", "スライダー"],
+    ["change", "チェンジ"],
+    ["other", "その他"]
+  ];
+  var PITCH_TYPE_SHORT = { straight: "直", curve: "カ", slider: "ス", change: "チ", other: "他" };
+  var TARGET_LABEL = { out: "アウト", "1B": "一塁", "2B": "二塁", "3B": "三塁", HOME: "本塁" };
+  var BASE_LABEL = { first: "一塁", second: "二塁", third: "三塁" };
+  var BASES3 = ["first", "second", "third"];
+  var STRIKES = /* @__PURE__ */ new Set(["strikeLooking", "strikeSwinging"]);
+  var PLAY_LABEL = Object.fromEntries(RESULT_PALETTE.map((p) => [p.key, p.label]));
+  var GROUP_LABEL = { hit: "安打", out: "アウト", other: "その他" };
+  var AMBIGUOUS_WITH_RUNNER = /* @__PURE__ */ new Set(["single", "double", "triple", "error", "fieldersChoice", "sacFly", "sacBunt"]);
+  var TAG_ROWS_MAIN = [
+    ["strength", "強さ", STRENGTH],
+    ["trajectory", "高さ", TRAJECTORY],
+    ["direction", "方向", DIRECTION],
+    ["depth", "深さ", DEPTH]
+  ];
+  var TAG_ROWS_FIELD = [
+    ["fieldPlay", "守備評価", FIELD_PLAY],
+    ["catchStyle", "捕球", CATCH_STYLE],
+    ["throwQuality", "送球", THROW_QUALITY]
+  ];
+  var el = (tag, attrs = {}, kids = []) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (v === true) n.setAttribute(k, "");
+      else if (v !== false && v != null) n.setAttribute(k, String(v));
+    }
+    for (const c of [].concat(kids)) if (c != null && c !== false) n.append(c);
+    return n;
+  };
+  var dots = (on, total, cls) => {
+    const w = el("span", { class: "dots" });
+    for (let i = 0; i < total; i++) w.append(el("span", { class: `dot ${cls}${i < on ? " on" : ""}` }));
+    return w;
+  };
+  function mountApp(root, { rosters, gameInfo, isDemo = false, setupKey = "a4l-poc-setup", onSetupSaved, showBrand = true, allowRosterEdit = true }) {
+    const gameId = gameInfo.gameId;
+    const LS_KEY = `a4l-poc-${gameId}`;
+    const startEvent = {
+      type: "gameStart",
+      payload: { awayTeamId: rosters.away.teamId, homeTeamId: rosters.home.teamId, innings: gameInfo.innings ?? 9 }
+    };
+    let store, tapLog = newLog(), banner = null, sheet = null, finalRecord = null;
+    let tab = "pitch", mode = "simple", swing = "looking", pitchType = "";
+    let scorerId = "", openFielding = false, openTags = true;
+    let recorder = null, recStartedAt = 0, clips = [], openAudio = false;
+    let openMetrics = false;
+    const players = [
+      ...rosters.away.players,
+      ...rosters.away.bench ?? [],
+      ...rosters.home.players,
+      ...rosters.home.bench ?? []
+    ];
+    const nameOf = (id) => players.find((p) => p.id === id)?.name ?? "";
+    const shortName = (id) => nameOf(id).slice(0, 3);
+    const state = () => store.getState(gameId);
+    const activeEvents = () => store.getEvents(gameId).map((e) => e.event);
+    function boot() {
+      store = createStore(appReducer, initialAppState(rosters));
+      store.create(gameId);
+      const saved = load();
+      if (saved) {
+        for (const rec of saved.log) rec.kind === "domain" ? store.append(gameId, rec.event) : store.undo(gameId);
+        tapLog = { taps: saved.taps ?? [] };
+        mode = saved.mode ?? "simple";
+        pitchType = saved.pitchType ?? "";
+        scorerId = saved.scorerId ?? "";
+        if (saved.finalized) finalRecord = store.finalize(gameId);
+      } else {
+        store.append(gameId, startEvent);
+        persist();
+      }
+    }
+    const load = () => {
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    };
+    const persist = () => {
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify({
+          log: store.getEvents(gameId, { includeAll: true }).map((e) => ({ kind: e.kind, event: e.event })),
+          taps: tapLog.taps,
+          finalized: !!finalRecord,
+          mode,
+          pitchType,
+          scorerId
+        }));
+      } catch {
+      }
+    };
+    function derive() {
+      const metas = [];
+      let s = initialAppState(rosters), pitches = [];
+      for (const ev of activeEvents()) {
+        const prev = s;
+        s = appReducer(prev, ev);
+        if (ev.type === "gameStart") continue;
+        if (ev.type === "pitch") pitches.push(ev.payload);
+        if (s.paSeq > prev.paSeq) {
+          const off = prev.core.half === "top" ? "away" : "home";
+          const isWalk = ev.type === "pitch" && ev.payload.result === "ball" && s.core.balls === 0 || ev.payload?.playType === "walk";
+          const isSO = ev.type === "pitch" && STRIKES.has(ev.payload.result) && s.core.strikes === 0 || ev.payload?.playType === "strikeout";
+          const batterResult = ev.type === "inPlay" || ev.type === "quickResult" || isWalk || isSO;
+          if (!batterResult) {
+            pitches = [];
+            continue;
+          }
+          metas.push({
+            scorerId,
+            gameId,
+            paSeq: prev.paSeq,
+            inning: prev.core.inning,
+            half: prev.core.half,
+            battingTeam: rosters[off].teamId,
+            batterId: prev.currentBatterId,
+            batterName: nameOf(prev.currentBatterId),
+            mode: pitches.length >= 1 ? "pitch" : "quick",
+            pitchCount: pitches.length >= 1 ? pitches.length : ev.payload?.pitchCount ?? 0,
+            resultPlayType: ev.payload?.playType ?? (ev.payload?.result === "hitByPitch" ? "hitByPitch" : isWalk ? "walk" : isSO ? "strikeout" : "other"),
+            outsAfter: prev.core.half !== s.core.half ? 3 : s.core.outs,
+            runsScored: off === "away" ? s.core.awayRuns - prev.core.awayRuns : s.core.homeRuns - prev.core.homeRuns
+          });
+          pitches = [];
+        }
+      }
+      return { metas, openPitches: pitches };
+    }
+    const tap = (action) => {
+      tapLog = recordTap(tapLog, { t: Date.now(), action, paSeq: state().paSeq });
+    };
+    function commit(ev, action) {
+      const prev = state();
+      try {
+        appReducer(prev, ev);
+      } catch (e) {
+        tap(`error:${action}`);
+        banner = e instanceof InvalidTransitionError ? `入力できません: ${e.message}` : `エラー: ${e.message}`;
+        sheet = null;
+        persist();
+        render();
+        return false;
+      }
+      tap(action);
+      store.append(gameId, ev);
+      swing = "looking";
+      banner = null;
+      sheet = null;
+      persist();
+      render();
+      return true;
+    }
+    function undo() {
+      tap("undo");
+      try {
+        store.undo(gameId);
+        banner = null;
+      } catch (e) {
+        banner = `取り消せません（${e.code ?? e.message}）`;
+      }
+      persist();
+      render();
+    }
+    function finalize() {
+      finalRecord = store.finalize(gameId);
+      tap("finalize");
+      banner = null;
+      sheet = null;
+      persist();
+      render();
+    }
+    function saveSetup(sh) {
+      const teams = {};
+      for (const t of ["away", "home"]) {
+        const d = sh.draft[t];
+        teams[t] = buildTeam(
+          t === "away" ? "AWAY" : "HOME",
+          d.name,
+          parseRoster(d.text),
+          { pitcherId: d.pitcherId ?? void 0 }
+        );
+      }
+      try {
+        localStorage.setItem(setupKey, JSON.stringify({
+          rosters: teams,
+          gameInfo: { title: sh.info.title, venue: sh.info.venue, innings: Number(sh.info.innings) || 7 }
+        }));
+        localStorage.removeItem(LS_KEY);
+      } catch (e) {
+        banner = `保存できませんでした（${e.message}）`;
+        render();
+        return;
+      }
+      if (typeof onSetupSaved === "function") onSetupSaved();
+      else if (typeof location !== "undefined" && typeof location.reload === "function") location.reload();
+      else {
+        banner = "名簿を保存しました。画面を開き直してください";
+        sheet = null;
+        render();
+      }
+    }
+    function resetAll() {
+      try {
+        localStorage.removeItem(LS_KEY);
+      } catch {
+      }
+      tapLog = newLog();
+      finalRecord = null;
+      banner = null;
+      sheet = null;
+      tab = "pitch";
+      boot();
+      render();
+    }
+    async function refreshClips() {
+      try {
+        clips = await listClips(gameId);
+      } catch {
+        clips = [];
+      }
+      render();
+    }
+    async function startRecording() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const rec = new MediaRecorder(stream);
+        const chunks = [];
+        rec.ondataavailable = (e) => {
+          if (e.data?.size) chunks.push(e.data);
+        };
+        rec.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+          const s2 = state();
+          try {
+            await saveClip({
+              gameId,
+              paSeq: s2.paSeq,
+              inning: s2.core.inning,
+              half: s2.core.half,
+              blob,
+              mime: rec.mimeType,
+              durationMs: Date.now() - recStartedAt
+            });
+            banner = "音声メモを端末に保存しました";
+          } catch (e) {
+            banner = `音声を保存できませんでした（${e.message}）`;
+          }
+          recorder = null;
+          await refreshClips();
+        };
+        rec.start();
+        recorder = rec;
+        recStartedAt = Date.now();
+        tap("rec:start");
+        banner = null;
+        render();
+      } catch (e) {
+        banner = `録音を開始できません（${e.message}）。マイクの許可を確認してください`;
+        recorder = null;
+        render();
+      }
+    }
+    function stopRecording() {
+      tap("rec:stop");
+      try {
+        recorder?.stop();
+      } catch {
+        recorder = null;
+        render();
+      }
+    }
+    function audioPanel(s) {
+      if (!isSupported()) {
+        return el("div", { class: "card section" }, [
+          el("h2", { text: "音声メモ" }),
+          el("div", { class: "sub", text: "この環境では録音できません（マイクに対応したブラウザで開いてください）。文字起こし済みのテキストからの取り込みは「試合」画面から行えます" })
+        ]);
+      }
+      const body = el("div");
+      body.append(el("div", { class: "sub", text: "打席ごとに実況を録っておき、あとで文字起こし → イベント化に回します。音声はこの端末の中だけに保存されます" }));
+      body.append(el("button", {
+        class: recorder ? "hot wide" : "primary wide",
+        text: recorder ? "■ 録音を止めて保存" : "● 音声メモを録る",
+        onclick: () => recorder ? stopRecording() : startRecording()
+      }));
+      if (clips.length) {
+        body.append(el("div", { class: "row-label", text: `保存済み（${clips.length}件）` }));
+        for (const c of clips.slice(0, 12)) {
+          const secs = c.durationMs ? `${Math.round(c.durationMs / 1e3)}秒` : "";
+          body.append(el("div", { class: "consent-row" }, [
+            el("span", { text: `${c.inning ?? "-"}回${c.half === "top" ? "表" : "裏"}・${c.paSeq ?? "-"}打席目 ${secs}` }),
+            el("span", {}, [
+              el("button", { text: "保存", onclick: () => downloadBlob(clipFileName(c), c.blob) }),
+              el("button", {
+                class: "ghost",
+                text: "削除",
+                onclick: async () => {
+                  await deleteClip(c.id);
+                  await refreshClips();
+                }
+              })
+            ])
+          ]));
+        }
+        body.append(el("button", {
+          class: "ghost wide small-link",
+          text: "全部まとめて保存",
+          onclick: () => {
+            for (const c of clips) downloadBlob(clipFileName(c), c.blob);
+          }
+        }));
+      }
+      return el("div", { class: "card section" }, [
+        el("button", { class: "collapse-head", onclick: () => {
+          openAudio = !openAudio;
+          render();
+        } }, [
+          el("span", { text: `音声メモ${clips.length ? `（${clips.length}件）` : ""}${recorder ? "　● 録音中" : ""}` }),
+          el("span", { class: "caret", text: openAudio ? "−" : "＋" })
+        ]),
+        openAudio ? body : null
+      ]);
+    }
+    function downloadBlob(name, blob) {
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = el("a", { href: url, download: name });
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2e3);
+        banner = `保存しました: ${name}`;
+      } catch (e) {
+        banner = `保存に失敗しました（${e.message}）`;
+      }
+      render();
+    }
+    function scoreHeader(s, box) {
+      const off = s.core.half === "top" ? "away" : "home";
+      const n = Math.max(s.innings, box.linescore.away.length, box.linescore.home.length);
+      const played = {
+        away: s.finished ? s.innings : s.core.inning,
+        home: s.finished ? s.innings : s.core.half === "bottom" ? s.core.inning : s.core.inning - 1
+      };
+      const head = el("tr", {}, [el("th", { class: "tname", text: "" })]);
+      for (let i = 0; i < n; i++) {
+        head.append(el("th", { class: `inn${!s.finished && i + 1 === s.core.inning ? " now" : ""}`, text: String(i + 1) }));
+      }
+      head.append(el("th", { class: "rh", text: "R" }), el("th", { class: "rh", text: "H" }));
+      const body = el("tbody");
+      for (const side of ["away", "home"]) {
+        const tr = el("tr", { class: off === side && !s.finished ? "batting" : "" }, [
+          el("td", { class: "tname", text: rosters[side].name })
+        ]);
+        for (let i = 0; i < n; i++) {
+          const v = box.linescore[side][i];
+          tr.append(el("td", {
+            class: `inn${!s.finished && i + 1 === s.core.inning ? " now" : ""}`,
+            text: v !== void 0 ? String(v) : i + 1 <= played[side] ? "0" : ""
+          }));
+        }
+        tr.append(
+          el("td", { class: "rh runs", text: String(box.totals[side].runs) }),
+          el("td", { class: "rh", text: String(box.totals[side].hits) })
+        );
+        body.append(tr);
+      }
+      const counts = s.finished ? el("div", { class: "st-final", text: "試合終了" }) : el("div", { class: "st-count" }, [
+        el("div", { class: "cnt" }, [el("span", { class: "lbl", text: "B" }), dots(s.core.balls, 3, "b")]),
+        el("div", { class: "cnt" }, [el("span", { class: "lbl", text: "S" }), dots(s.core.strikes, 2, "s")]),
+        el("div", { class: "cnt" }, [el("span", { class: "lbl", text: "O" }), dots(s.core.outs, 2, "o")])
+      ]);
+      return el("div", { class: "card header" }, [
+        el("div", { class: "hd-top" }, [
+          el("div", { class: "st-inning" }, [
+            el("span", { class: "st-num", text: String(Math.min(s.core.inning, s.innings)) }),
+            el("span", { class: "st-half", text: s.core.half === "top" ? "回表" : "回裏" })
+          ]),
+          counts
+        ]),
+        el("div", { class: "scroll-x" }, [el("table", { class: "mini-line" }, [lineCols(n), el("thead", {}, [head]), body])])
+      ]);
+    }
+    function lineCols(n) {
+      const g = el("colgroup", {}, [el("col", { class: "c-name" })]);
+      const w = ((100 - 33 - 18) / n).toFixed(2);
+      for (let i = 0; i < n; i++) g.append(el("col", { style: `width:${w}%` }));
+      g.append(el("col", { style: "width:9%" }), el("col", { style: "width:9%" }));
+      return g;
+    }
+    function diamond(runners, big) {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 -12 124 124");
+      svg.setAttribute("class", big ? "diamond big" : "diamond");
+      const pts = { second: [60, 20], third: [22, 58], first: [98, 58], home: [60, 96] };
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      path.setAttribute("points", "60,20 98,58 60,96 22,58");
+      path.setAttribute("class", "dpath");
+      svg.append(path);
+      for (const [base, [x, y]] of Object.entries(pts)) {
+        const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        const size = base === "home" ? 9 : 13;
+        r.setAttribute("x", x - size);
+        r.setAttribute("y", y - size);
+        r.setAttribute("width", size * 2);
+        r.setAttribute("height", size * 2);
+        r.setAttribute("transform", `rotate(45 ${x} ${y})`);
+        r.setAttribute("class", `base${base !== "home" && runners[base] ? " on" : ""}${base === "home" ? " home" : ""}`);
+        svg.append(r);
+        if (base !== "home" && runners[base]) {
+          const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          t.setAttribute("x", x);
+          t.setAttribute("y", base === "second" ? y - 18 : y + 26);
+          t.setAttribute("class", "runner-name");
+          t.setAttribute("text-anchor", "middle");
+          t.textContent = shortName(runners[base]);
+          svg.append(t);
+        }
+      }
+      return svg;
+    }
+    function situationCard(s, box) {
+      const off = s.core.half === "top" ? "away" : "home";
+      const def = off === "away" ? "home" : "away";
+      const row = s.currentBatterId ? box[off].batters.find((b) => b.playerId === s.currentBatterId) : null;
+      const p = s.currentBatterId ? players.find((x) => x.id === s.currentBatterId) : null;
+      const pitcher = playerById(rosters, s.pitchers[def]);
+      const pRow = box[def].pitchers.find((x) => x.playerId === s.pitchers[def]) ?? box[def].pitchers[0];
+      return el("div", { class: "card situation" }, [
+        diamond(s.baseRunners, true),
+        el("div", { class: "sit-main" }, [
+          p ? el("div", { class: "batter-line" }, [
+            el("span", { class: "chip", text: `${row?.order ?? ""}番` }),
+            el("span", { class: "chip", text: `#${p.number}` }),
+            el("span", { class: "batter-name", text: p.name })
+          ]) : el("div", { class: "batter-name", text: "—" }),
+          row ? el("div", { class: "sub", text: `本日 ${row.ab}打数${row.h}安打${row.bb ? ` ${row.bb}四球` : ""}${row.so ? ` ${row.so}三振` : ""}　打率 ${row.ab ? row.avg.toFixed(3).replace(/^0/, "") : "-"}` }) : null,
+          el("div", { class: "sub", text: `投手 ${pitcher?.name ?? "-"}（${pRow.pitches}球・${pRow.ip}回・奪三${pRow.so}）` })
+        ])
+      ]);
+    }
+    function pitchStrip(openPitches) {
+      const wrap = el("div", { class: "card strip" }, [el("span", { class: "strip-label", text: "Pitches" })]);
+      if (!openPitches.length) {
+        wrap.append(el("span", { class: "sub", text: "まだ投球の入力はありません" }));
+        return wrap;
+      }
+      openPitches.forEach((pp, i) => {
+        const cls = pp.result === "ball" ? "b" : pp.result === "foul" ? "f" : "s";
+        const tName = (PITCH_TYPES.find(([k]) => k === pp.pitchType) ?? [])[1];
+        wrap.append(el("span", { class: `pbadge ${cls}`, title: `${i + 1}球目 ${PITCH_LABEL[pp.result] ?? pp.result}${tName ? ` / ${tName}` : ""}${pp.zone9 ? ` / ${pp.zone9}番` : ""}` }, [
+          el("span", { class: "pno", text: String(i + 1) }),
+          el("span", { class: "pres", text: PITCH_SHORT[pp.result] ?? "?" }),
+          pp.pitchType && PITCH_TYPE_SHORT[pp.pitchType] ? el("span", { class: "ptag", text: PITCH_TYPE_SHORT[pp.pitchType] }) : null,
+          pp.zone9 ? el("span", { class: "pzone", text: String(pp.zone9) }) : null
+        ]));
+      });
+      return wrap;
+    }
+    function tabBar(acts) {
+      const defs = [["pitch", "投球"], ["result", "結果"], ["runner", `走者${acts.steals.length ? `(${acts.steals.length})` : ""}`]];
+      return el("div", { class: "tabs" }, defs.map(([key, label]) => el("button", {
+        class: `tab${tab === key ? " active" : ""}`,
+        text: label,
+        onclick: () => {
+          tap(`tab:${key}`);
+          tab = key;
+          render();
+        }
+      })));
+    }
+    function pitchPane(s, acts) {
+      const pane = el("div", { class: "pane" });
+      pane.append(el("div", { class: "seg" }, [
+        el("button", {
+          class: `seg-btn${mode === "simple" ? " on" : ""}`,
+          text: "かんたん",
+          onclick: () => {
+            tap("mode:simple");
+            mode = "simple";
+            persist();
+            render();
+          }
+        }),
+        el("button", {
+          class: `seg-btn${mode === "zone" ? " on" : ""}`,
+          text: "コース入力（9分割）",
+          onclick: () => {
+            tap("mode:zone");
+            mode = "zone";
+            persist();
+            render();
+          }
+        })
+      ]));
+      if (!acts.pitches.length) {
+        pane.append(el("div", { class: "sub", text: "試合が終了しているため投球は入力できません" }));
+        return pane;
+      }
+      pane.append(pitchTypeRow());
+      if (mode === "simple") {
+        pane.append(el("div", { class: "grid g2 pad" }, ["strikeLooking", "ball", "strikeSwinging", "foul"].map((k) => el("button", {
+          class: `big ${k === "ball" ? "cool" : STRIKES.has(k) ? "hot" : ""}`,
+          text: PITCH_LABEL[k],
+          onclick: () => commit(
+            { type: "pitch", payload: { result: k, pitchType: pitchType || void 0 } },
+            `pitch:${k}`
+          )
+        }))));
+        pane.append(hbpRow());
+        pane.append(quickResultRow(s));
+        return pane;
+      }
+      pane.append(el("div", { class: "seg small" }, SWINGS.map(([k, label]) => el("button", {
+        class: `seg-btn${swing === k ? " on" : ""}`,
+        text: label,
+        onclick: () => {
+          tap(`swing:${k}`);
+          swing = k;
+          render();
+        }
+      }))));
+      const grid = el("div", { class: "zone" });
+      for (const c of cells()) {
+        const res = resultFor(c.col, c.row, swing);
+        grid.append(el("button", {
+          class: `zcell${c.strike ? " strike" : ""} r-${res}`,
+          title: `${c.label} → ${PITCH_LABEL[res]}`,
+          onclick: () => commit(
+            {
+              type: "pitch",
+              payload: { result: res, zone: c.id, zone9: c.zone9, swing, pitchType: pitchType || void 0 }
+            },
+            `zone:${c.id}:${swing}`
+          )
+        }, [el("span", { class: "znum", text: c.zone9 ? String(c.zone9) : "" })]));
+      }
+      pane.append(grid);
+      pane.append(el("div", { class: "sub", text: `中央9マス＝ストライクゾーン。タップした位置でコースを記録し、B/Sは自動判定（今は「${SWINGS.find(([k]) => k === swing)[1]}」）` }));
+      pane.append(hbpRow());
+      pane.append(quickResultRow(s));
+      return pane;
+    }
+    function hbpRow() {
+      return el("button", {
+        class: "ghost wide small-link",
+        text: "死球（打者に当たった）",
+        onclick: () => commit(
+          { type: "pitch", payload: { result: "hitByPitch", pitchType: pitchType || void 0 } },
+          "pitch:hitByPitch"
+        )
+      });
+    }
+    function pitchTypeRow() {
+      const wrap = el("div", { class: "ptype" });
+      wrap.append(el("span", { class: "ptype-label", text: "球種" }));
+      for (const [k, label] of PITCH_TYPES) {
+        wrap.append(el("button", {
+          class: `ptype-btn${pitchType === k ? " on" : ""}`,
+          text: label,
+          onclick: () => {
+            tap(`ptype:${k || "none"}`);
+            pitchType = k;
+            persist();
+            render();
+          }
+        }));
+      }
+      return wrap;
+    }
+    const COMMON_RESULTS = ["single", "double", "groundOut", "flyOut", "strikeout", "walk"];
+    function quickResultRow(s) {
+      const wrap = el("div", {});
+      wrap.append(el("div", { class: "row-label", text: "打席の結果（よく使う）" }));
+      wrap.append(el("div", { class: "grid g3" }, COMMON_RESULTS.map((key) => {
+        const item = RESULT_PALETTE.find((p) => p.key === key);
+        return el("button", {
+          class: `res ${item.group}`,
+          text: item.label,
+          disabled: !isPaletteEnabled(s, key),
+          onclick: () => onResult(s, key)
+        });
+      })));
+      wrap.append(el("button", {
+        class: "ghost wide small-link",
+        text: "その他の結果（犠飛・併殺・失策ほか）",
+        onclick: () => {
+          tap("tab:result");
+          tab = "result";
+          render();
+        }
+      }));
+      return wrap;
+    }
+    function resultPane(s) {
+      const pane = el("div", { class: "pane" });
+      if (s.finished || !s.currentBatterId) {
+        pane.append(el("div", { class: "sub", text: "打者がいないため結果は入力できません" }));
+        return pane;
+      }
+      for (const group of ["hit", "out", "other"]) {
+        const items = RESULT_PALETTE.filter((p) => p.group === group);
+        if (!items.length) continue;
+        pane.append(el("div", { class: "row-label", text: GROUP_LABEL[group] }));
+        pane.append(el("div", { class: "grid g3" }, items.map((p) => el("button", {
+          class: `res ${group}`,
+          text: p.label,
+          disabled: !isPaletteEnabled(s, p.key),
+          onclick: () => onResult(s, p.key)
+        }))));
+      }
+      pane.append(el("div", { class: "sub", text: "1タップで確定します（走者の行き先は自動。調整が必要なときだけ確認画面が出ます）" }));
+      return pane;
+    }
+    function onResult(s, playType) {
+      const plan = quickCommitPlan(s, playType);
+      const hasRunner = BASES3.some((b) => s.baseRunners[b]);
+      const ambiguous = hasRunner && AMBIGUOUS_WITH_RUNNER.has(playType);
+      if (plan.ok && !ambiguous) {
+        commit({ type: "inPlay", payload: { playType, advances: plan.advances } }, `result:${playType}`);
+        return;
+      }
+      tap(`result-editor:${playType}`);
+      sheet = {
+        kind: "advances",
+        playType,
+        adv: plan.advances ?? defaultAdvances(playType, s.baseRunners),
+        reason: plan.ok ? null : plan.reason,
+        hint: plan.ok ? "走者の行き先を確認してください（既定値が入っています）" : null
+      };
+      render();
+    }
+    function openRunnerAdvance(s, reason) {
+      const adv = {};
+      if (AUTO_ADVANCE_REASONS.has(reason)) {
+        for (const b of BASES3) if (s.baseRunners[b]) adv[b] = b === "third" ? "HOME" : NEXT_BASE[b];
+      }
+      tap(`open:runner:${reason}`);
+      sheet = {
+        kind: "runnerAdvance",
+        reason,
+        adv,
+        hint: AUTO_ADVANCE_REASONS.has(reason) ? "走者を1つ進める既定値が入っています。必要なら変えてください" : "アウトになった走者に「アウト」を、進んだ走者に行き先を指定してください"
+      };
+      render();
+    }
+    function openFixAdvances() {
+      const all = store.getEvents(gameId);
+      let i = all.length - 1;
+      const trailing = [];
+      while (i >= 0 && all[i].event.type === "tag") {
+        trailing.unshift(all[i].event);
+        i -= 1;
+      }
+      const target = i >= 0 ? all[i].event : null;
+      if (!target || !(target.type === "inPlay" || target.type === "quickResult")) {
+        banner = "直前の打球が見つかりません。Undoで戻してから入力し直してください";
+        render();
+        return;
+      }
+      let before = initialAppState(rosters);
+      for (let k = 0; k < i; k++) before = appReducer(before, all[k].event);
+      tap("open:fixadv");
+      sheet = {
+        kind: "advances",
+        playType: target.payload.playType,
+        adv: { ...target.payload.advances },
+        hint: "この打球の走者の行き先を直します（記録は書き換えられ、打点も付け直されます）",
+        fix: { type: target.type, payload: target.payload, trailing, undoCount: trailing.length + 1 },
+        stateBefore: before
+      };
+      render();
+    }
+    function commitFix() {
+      const { type, payload, trailing, undoCount } = sheet.fix;
+      const adv = sheet.adv;
+      for (let k = 0; k < undoCount; k += 1) {
+        try {
+          store.undo(gameId);
+        } catch {
+        }
+      }
+      const ev = { type, payload: { ...payload, advances: adv } };
+      try {
+        appReducer(state(), ev);
+      } catch (e) {
+        store.append(gameId, { type, payload });
+        for (const t of trailing) store.append(gameId, t);
+        banner = `修正できません: ${e.message}`;
+        sheet = null;
+        persist();
+        render();
+        return;
+      }
+      store.append(gameId, ev);
+      for (const t of trailing) store.append(gameId, t);
+      tap("fixadv");
+      banner = "直前の打球の進塁を修正しました";
+      sheet = null;
+      persist();
+      render();
+    }
+    function runnerPane(s, acts) {
+      const pane = el("div", { class: "pane" });
+      if (!acts.steals.length) pane.append(el("div", { class: "sub", text: "塁上に走者がいません" }));
+      for (const st of acts.steals) {
+        pane.append(el("div", { class: "row-label", text: `${BASE_LABEL[st.from]}走者 ${nameOf(st.runnerId)}` }));
+        pane.append(el("div", { class: "grid g2" }, [
+          el("button", {
+            class: "cool",
+            text: "盗塁成功（セーフ）",
+            onclick: () => commit({ type: "steal", payload: { from: st.from, result: "safe" } }, `steal:${st.from}:safe`)
+          }),
+          el("button", {
+            class: "hot",
+            text: "盗塁死（アウト）",
+            onclick: () => commit({ type: "steal", payload: { from: st.from, result: "out" } }, `steal:${st.from}:out`)
+          })
+        ]));
+      }
+      const anyRunner = BASES3.some((b) => s.baseRunners[b]);
+      if (!anyRunner && !s.finished && s.currentBatterId) {
+        pane.append(el("div", { class: "row-label", text: "タイブレーク・継続試合" }));
+        pane.append(el("button", {
+          class: "ghost wide",
+          text: "走者を置いて再開",
+          onclick: () => {
+            tap("open:place");
+            sheet = {
+              kind: "place",
+              team: s.core.half === "top" ? "away" : "home",
+              picks: {}
+            };
+            render();
+          }
+        }));
+      }
+      if (anyRunner && !s.finished) {
+        pane.append(el("div", { class: "row-label", text: "走者だけが動く事象（打席は続きます）" }));
+        pane.append(el("div", { class: "grid g2" }, RUNNER_EVENTS.map(([reason, label]) => el("button", { text: label, onclick: () => openRunnerAdvance(s, reason) }))));
+        pane.append(el("div", { class: "sub", text: "暴投・捕逸・ボークは走者を1つ進める既定値が入ります。カウントと打者は変わりません" }));
+      }
+      return pane;
+    }
+    function tagPanel(last, openPitches) {
+      if (!last) return null;
+      const expanded = openTags && openPitches.length === 0;
+      const head = el("button", { class: "collapse-head", onclick: () => {
+        tap("toggle:tags");
+        openTags = !openTags;
+        render();
+      } }, [
+        el("span", {}, [
+          el("span", { text: "直前の打球の内容（任意）" }),
+          el("span", { class: "tag-sub", text: `　${last.batterName}／${PLAY_LABEL[last.playType] ?? last.playType}` })
+        ]),
+        el("span", { class: "caret", text: expanded ? "−" : "＋" })
+      ]);
+      if (!expanded) return el("div", { class: "card section tagfold" }, [head]);
+      const body = el("div", { class: "tagbody" });
+      const putRow = ([field, label, list]) => {
+        body.append(el("div", { class: "row-label", text: label }));
+        const chips = el("div", { class: "chips" });
+        for (const item of list) {
+          chips.append(el("button", {
+            class: last[field] === item.key ? "sel" : "",
+            text: item.label,
+            onclick: () => commit({ type: "tag", payload: { paSeq: last.paSeq, [field]: item.key } }, `tag:${field}`)
+          }));
+        }
+        body.append(chips);
+      };
+      TAG_ROWS_MAIN.forEach(putRow);
+      body.append(el("button", {
+        class: "ghost wide small-link",
+        text: "進塁を直す",
+        onclick: openFixAdvances
+      }));
+      body.append(el("button", {
+        class: "ghost wide small-link",
+        text: openFielding ? "守備の内容を閉じる" : "守備の内容も残す（任意）",
+        onclick: () => {
+          tap("toggle:fielding");
+          openFielding = !openFielding;
+          render();
+        }
+      }));
+      if (openFielding) TAG_ROWS_FIELD.forEach(putRow);
+      return el("div", { class: "card section" }, [head, body]);
+    }
+    function extraInningsCard(s) {
+      const battingTeam = s.core.half === "top" ? "away" : "home";
+      return el("div", { class: "card section" }, [
+        el("h2", { text: `規定${s.innings}回が終了しました` }),
+        el("div", {}, [
+          el("div", { class: "sub", text: "同点で延長に入る場合、または継続試合として走者を置いて再開する場合はこちら。試合を終える場合は「試合を確定」を押してください。" }),
+          el("button", {
+            class: "wide primary",
+            text: `延長に入る（${s.innings + 1}回まで）`,
+            onclick: () => commit({ type: "setInnings", payload: { innings: s.innings + 1 } }, "setInnings")
+          }),
+          el("div", { class: "sub", text: "タイブレークで走者を置くときは、延長に入ってから「走者」タブで指定します" })
+        ])
+      ]);
+    }
+    function footerBar(s) {
+      return el("div", { class: "footbar" }, [
+        el("button", { class: "ghost", text: "Undo", disabled: !!finalRecord, onclick: undo }),
+        el("button", {
+          class: "ghost",
+          text: "打席単位",
+          disabled: !s.currentBatterId || s.finished,
+          onclick: () => {
+            tap("open:quick");
+            sheet = { kind: "quick", playType: null, adv: null, pitchCount: 0 };
+            render();
+          }
+        }),
+        el("button", {
+          class: "ghost",
+          text: "交代",
+          disabled: !!finalRecord,
+          onclick: () => {
+            tap("open:sub");
+            sheet = {
+              kind: "sub",
+              mode: "pitcher",
+              team: s.core.half === "top" ? "home" : "away",
+              slot: null,
+              playerId: null
+            };
+            render();
+          }
+        }),
+        el("button", {
+          class: "ghost",
+          text: "試合を確定",
+          disabled: !!finalRecord,
+          onclick: () => {
+            tap("open:finalize");
+            sheet = { kind: "finalize" };
+            render();
+          }
+        })
+      ]);
+    }
+    function advEditor(s, acts, sh, withBatter = true) {
+      const box = el("div");
+      const put = (label, key, targets, allowStay) => {
+        box.append(el("div", { class: "row-label", text: label }));
+        const chips = el("div", { class: "chips" });
+        for (const t of targets) {
+          chips.append(el("button", {
+            class: sh.adv[key] === t ? "sel" : "",
+            text: TARGET_LABEL[t],
+            onclick: () => {
+              sh.adv[key] = t;
+              render();
+            }
+          }));
+        }
+        if (allowStay) {
+          chips.append(el("button", {
+            class: sh.adv[key] === void 0 ? "sel" : "",
+            text: "動かない",
+            onclick: () => {
+              delete sh.adv[key];
+              render();
+            }
+          }));
+        }
+        box.append(chips);
+      };
+      if (withBatter) {
+        put(
+          `打者 ${nameOf(s.currentBatterId)}`,
+          "batter",
+          acts.batterTargets.length ? acts.batterTargets : ["out", "1B", "2B", "3B", "HOME"],
+          false
+        );
+      }
+      for (const b of BASES3) {
+        const targets = acts.runnerTargets[b];
+        if (!targets) continue;
+        put(`${BASE_LABEL[b]}走者 ${nameOf(acts.runners[b])}`, b, targets, true);
+      }
+      return box;
+    }
+    function sheetView(s, acts) {
+      if (!sheet) return null;
+      const close = () => {
+        tap("close:sheet");
+        sheet = null;
+        render();
+      };
+      const wrap = (title, body, actions) => el("div", { class: "sheet-bg", onclick: (e) => {
+        if (e.target.className === "sheet-bg") close();
+      } }, [
+        el("div", { class: "sheet" }, [el("h2", { text: title }), body, el("div", { class: "sheet-actions" }, actions)])
+      ]);
+      if (sheet.kind === "advances") {
+        const body = el("div");
+        if (sheet.reason) body.append(el("div", { class: "banner warn", text: `自動では確定できませんでした: ${sheet.reason}` }));
+        if (sheet.hint) body.append(el("div", { class: "sub", text: sheet.hint }));
+        const eState = sheet.stateBefore ?? s;
+        const eActs = sheet.stateBefore ? availableActions(sheet.stateBefore) : acts;
+        body.append(advEditor(eState, eActs, sheet));
+        const outsOnPlay = Object.values(sheet.adv).filter((v) => v === "out").length;
+        const homeOnPlay = Object.values(sheet.adv).some((v) => v === "HOME");
+        if (homeOnPlay && eState.core.outs + outsOnPlay >= 3) {
+          body.append(el("div", { class: "row-label", text: "第3アウトの種類（規則）" }));
+          body.append(el("div", { class: "chips" }, [
+            el("button", {
+              class: sheet.forceThirdOut ? "" : "sel",
+              text: "得点は認める",
+              onclick: () => {
+                sheet.forceThirdOut = false;
+                render();
+              }
+            }),
+            el("button", {
+              class: sheet.forceThirdOut ? "sel" : "",
+              text: "フォースアウト（得点は無効）",
+              onclick: () => {
+                sheet.forceThirdOut = true;
+                render();
+              }
+            })
+          ]));
+        }
+        return wrap(`${PLAY_LABEL[sheet.playType] ?? sheet.playType} の行き先`, body, [
+          el("button", { class: "ghost", text: "キャンセル", onclick: close }),
+          el("button", {
+            class: "primary",
+            text: sheet.fix ? "修正する" : "記録する",
+            onclick: () => sheet.fix ? commitFix() : commit({ type: "inPlay", payload: {
+              playType: sheet.playType,
+              advances: sheet.adv,
+              forceThirdOut: sheet.forceThirdOut === true
+            } }, `adv:${sheet.playType}`)
+          })
+        ]);
+      }
+      if (sheet.kind === "runnerAdvance") {
+        const body = el("div");
+        body.append(el("div", { class: "sub", text: sheet.hint }));
+        body.append(advEditor(s, acts, sheet, false));
+        return wrap(RUNNER_EVENT_LABEL[sheet.reason] ?? "走者の進塁", body, [
+          el("button", { class: "ghost", text: "キャンセル", onclick: close }),
+          el("button", {
+            class: "primary",
+            text: "記録する",
+            onclick: () => commit(
+              { type: "runnerAdvance", payload: { reason: sheet.reason, advances: sheet.adv } },
+              `runnerAdvance:${sheet.reason}`
+            )
+          })
+        ]);
+      }
+      if (sheet.kind === "quick") {
+        const body = el("div");
+        body.append(el("div", { class: "sub", text: "投球を1球も入力せずに、打席の結果だけを記録します（1球単位入力の継続率の測定対象になります）" }));
+        body.append(el("div", { class: "row-label", text: "結果" }));
+        body.append(el("div", { class: "grid g3" }, RESULT_PALETTE.map((p) => el("button", {
+          class: sheet.playType === p.key ? "sel" : "",
+          text: p.label,
+          onclick: () => {
+            sheet.playType = p.key;
+            sheet.adv = defaultAdvances(p.key, s.baseRunners);
+            render();
+          }
+        }))));
+        body.append(el("div", { class: "row-label", text: "この打席の投球数（分かる範囲で）" }));
+        body.append(el("input", {
+          type: "number",
+          min: 0,
+          max: 30,
+          value: String(sheet.pitchCount),
+          oninput: (e) => {
+            sheet.pitchCount = Number(e.target.value) || 0;
+          }
+        }));
+        if (sheet.playType) {
+          body.append(el("div", { class: "row-label", text: "走者の行き先（既定値を必要なだけ直す）" }));
+          body.append(advEditor(s, acts, sheet));
+        }
+        return wrap("打席単位で記録", body, [
+          el("button", { class: "ghost", text: "キャンセル", onclick: close }),
+          el("button", {
+            class: "primary",
+            text: "記録する",
+            disabled: !sheet.playType,
+            onclick: () => commit(
+              { type: "quickResult", payload: { playType: sheet.playType, advances: sheet.adv, pitchCount: sheet.pitchCount } },
+              `quick:${sheet.playType}`
+            )
+          })
+        ]);
+      }
+      if (sheet.kind === "scorer") {
+        const body = el("div");
+        body.append(el("div", { class: "sub", text: "誰が入力したかを記録します。入力者ごとの判定の甘辛を後から補正するために必要で、後付けができません（CSVの全行に入ります）。" }));
+        body.append(el("div", { class: "row-label", text: "入力者名 または ID" }));
+        const input = el("input", {
+          type: "text",
+          value: sheet.value ?? "",
+          placeholder: "例: 山田（審判）",
+          oninput: (e) => {
+            sheet.value = e.target.value;
+          }
+        });
+        body.append(input);
+        return wrap("入力者の設定", body, [
+          el("button", { class: "ghost", text: "キャンセル", onclick: close }),
+          el("button", {
+            class: "primary",
+            text: "保存",
+            onclick: () => {
+              scorerId = (sheet.value ?? "").trim();
+              tap("set:scorer");
+              sheet = null;
+              persist();
+              render();
+            }
+          })
+        ]);
+      }
+      if (sheet.kind === "roster") {
+        const d = sheet.draft[sheet.team];
+        const parsed = parseRoster(d.text);
+        const team = buildTeam(
+          sheet.team === "away" ? "AWAY" : "HOME",
+          d.name || "（チーム名未入力）",
+          parsed,
+          { pitcherId: d.pitcherId ?? void 0 }
+        );
+        const body = el("div");
+        body.append(el("div", { class: "seg" }, ["away", "home"].map((t) => el("button", {
+          class: `seg-btn${sheet.team === t ? " on" : ""}`,
+          text: t === "away" ? "先攻" : "後攻",
+          onclick: () => {
+            sheet.team = t;
+            render();
+          }
+        }))));
+        body.append(el("div", { class: "row-label", text: "チーム名" }));
+        body.append(el("input", {
+          type: "text",
+          value: d.name,
+          placeholder: "例: 桜ヶ丘ベースボールクラブ",
+          oninput: (e) => {
+            d.name = e.target.value;
+          }
+        }));
+        body.append(el("div", { class: "row-label", text: "選手名（貼り付け・1行1人）" }));
+        const ta = el("textarea", {
+          rows: 8,
+          placeholder: "1 佐藤健二 投\n2 田中大輔\n…（9人以上・10人目以降は控え）",
+          oninput: (e) => {
+            d.text = e.target.value;
+            sheet.dirty = true;
+          }
+        }, [d.text]);
+        body.append(ta);
+        body.append(el("button", { class: "ghost wide small-link", text: "入力内容を確認する", onclick: () => render() }));
+        body.append(el("div", { class: "sub", text: "「背番号 氏名」形式。カンマ・タブ区切りや全角数字も読み込めます。3列目に「投」と書くと先発投手になります" }));
+        for (const msg of parsed.errors) body.append(el("div", { class: "banner warn", text: msg }));
+        if (!team) {
+          body.append(el("div", { class: "banner warn", text: `9人以上必要です（いま ${parsed.players.length} 人）` }));
+        } else {
+          body.append(el("div", { class: "row-label", text: `打順（${team.players.length}人）と控え（${team.bench.length}人）` }));
+          body.append(el("div", {
+            class: "sub",
+            text: team.players.map((p, i) => `${i + 1}番 #${p.number} ${p.name}`).join(" ／ ") + (team.bench.length ? `　控え: ${team.bench.map((p) => `#${p.number} ${p.name}`).join(" ")}` : "")
+          }));
+          body.append(el("div", { class: "row-label", text: "先発投手" }));
+          body.append(el("div", { class: "chips" }, [...team.players, ...team.bench].map((p) => el("button", {
+            class: (d.pitcherId ?? team.pitcherId) === p.id ? "sel" : "",
+            text: p.name,
+            onclick: () => {
+              d.pitcherId = p.id;
+              render();
+            }
+          }))));
+        }
+        body.append(el("div", { class: "row-label", text: "試合情報" }));
+        body.append(el("input", {
+          type: "text",
+          value: sheet.info.title,
+          placeholder: "大会名",
+          oninput: (e) => {
+            sheet.info.title = e.target.value;
+          }
+        }));
+        body.append(el("input", {
+          type: "text",
+          value: sheet.info.venue,
+          placeholder: "球場名",
+          oninput: (e) => {
+            sheet.info.venue = e.target.value;
+          }
+        }));
+        body.append(el("div", { class: "row-label", text: "回数" }));
+        body.append(el("input", {
+          type: "number",
+          min: 1,
+          max: 15,
+          value: String(sheet.info.innings),
+          oninput: (e) => {
+            sheet.info.innings = Number(e.target.value) || 7;
+          }
+        }));
+        body.append(el("div", { class: "sub", text: "実名を入れる場合: 名簿と記録はこの端末の中にだけ保存されます。書き出したCSVは共用のPCやクラウドに置かないでください（未成年の個人情報にあたります）" }));
+        const bothOk = ["away", "home"].every((t) => {
+          const dd = sheet.draft[t];
+          return !!buildTeam(t === "away" ? "AWAY" : "HOME", dd.name || "-", parseRoster(dd.text), {});
+        });
+        return wrap("名簿と試合情報", body, [
+          el("button", { class: "ghost", text: "キャンセル", onclick: close }),
+          el("button", { class: "primary", text: "保存して開始", disabled: !bothOk, onclick: () => saveSetup(sheet) })
+        ]);
+      }
+      if (sheet.kind === "sub") {
+        const body = el("div");
+        const teamLabel = { away: `${rosters.away.name}（先攻）`, home: `${rosters.home.name}（後攻）` };
+        body.append(el("div", { class: "seg" }, [
+          el("button", {
+            class: `seg-btn${sheet.mode === "pitcher" ? " on" : ""}`,
+            text: "投手交代",
+            onclick: () => {
+              sheet.mode = "pitcher";
+              sheet.playerId = null;
+              sheet.slot = null;
+              render();
+            }
+          }),
+          el("button", {
+            class: `seg-btn${sheet.mode === "batting" ? " on" : ""}`,
+            text: "代打・守備交代",
+            onclick: () => {
+              sheet.mode = "batting";
+              sheet.playerId = null;
+              sheet.slot = null;
+              render();
+            }
+          })
+        ]));
+        body.append(el("div", { class: "row-label", text: "チーム" }));
+        body.append(el("div", { class: "chips" }, ["away", "home"].map((t) => el("button", {
+          class: sheet.team === t ? "sel" : "",
+          text: teamLabel[t],
+          onclick: () => {
+            sheet.team = t;
+            sheet.playerId = null;
+            sheet.slot = null;
+            render();
+          }
+        }))));
+        if (sheet.mode === "pitcher") {
+          const cur = playerById(rosters, s.pitchers[sheet.team]);
+          body.append(el("div", { class: "sub", text: `現在の投手: ${cur?.name ?? "-"}` }));
+          body.append(el("div", { class: "row-label", text: "新しい投手" }));
+          const cands = [...rosters[sheet.team].bench ?? [], ...rosters[sheet.team].players].filter((p) => p.id !== s.pitchers[sheet.team]);
+          body.append(el("div", { class: "chips" }, cands.map((p) => el("button", {
+            class: sheet.playerId === p.id ? "sel" : "",
+            text: `${p.name}${(rosters[sheet.team].bench ?? []).includes(p) ? "（控え）" : ""}`,
+            onclick: () => {
+              sheet.playerId = p.id;
+              render();
+            }
+          }))));
+        } else {
+          body.append(el("div", { class: "row-label", text: "交代する打順" }));
+          body.append(el("div", { class: "chips" }, s.lineup[sheet.team].map((id, i) => el("button", {
+            class: sheet.slot === i ? "sel" : "",
+            text: `${i + 1}番 ${playerById(rosters, id)?.name ?? id}`,
+            onclick: () => {
+              sheet.slot = i;
+              render();
+            }
+          }))));
+          const cands = eligible(rosters, s.lineup, sheet.team);
+          body.append(el("div", { class: "row-label", text: cands.length ? "入る選手（控え）" : "入れる控えがいません" }));
+          body.append(el("div", { class: "chips" }, cands.map((p) => el("button", {
+            class: sheet.playerId === p.id ? "sel" : "",
+            text: `${p.name} #${p.number}`,
+            onclick: () => {
+              sheet.playerId = p.id;
+              render();
+            }
+          }))));
+          body.append(el("div", { class: "sub", text: "交代した選手は元に戻せません（記録は交代後の選手に付きます）" }));
+        }
+        const ready = sheet.mode === "pitcher" ? !!sheet.playerId : sheet.slot !== null && !!sheet.playerId;
+        return wrap("選手交代", body, [
+          el("button", { class: "ghost", text: "キャンセル", onclick: close }),
+          el("button", {
+            class: "primary",
+            text: "交代する",
+            disabled: !ready,
+            onclick: () => sheet.mode === "pitcher" ? commit(
+              { type: "changePitcher", payload: { team: sheet.team, playerId: sheet.playerId } },
+              `changePitcher:${sheet.team}`
+            ) : commit(
+              { type: "substitute", payload: { team: sheet.team, slot: sheet.slot, playerId: sheet.playerId } },
+              `substitute:${sheet.team}:${sheet.slot}`
+            )
+          })
+        ]);
+      }
+      if (sheet.kind === "place") {
+        const body = el("div");
+        body.append(el("div", { class: "sub", text: "タイブレークや継続試合の再開で、走者を置いた状態から始めます（塁が空のときだけ使えます）" }));
+        for (const b of BASES3) {
+          body.append(el("div", { class: "row-label", text: `${BASE_LABEL[b]}走者` }));
+          body.append(el("div", { class: "chips" }, [
+            el("button", {
+              class: sheet.picks[b] ? "" : "sel",
+              text: "置かない",
+              onclick: () => {
+                delete sheet.picks[b];
+                render();
+              }
+            }),
+            ...s.lineup[sheet.team].map((id) => el("button", {
+              class: sheet.picks[b] === id ? "sel" : "",
+              text: nameOf(id),
+              onclick: () => {
+                sheet.picks[b] = id;
+                render();
+              }
+            }))
+          ]));
+        }
+        const dup = Object.values(sheet.picks);
+        const ok = dup.length > 0 && new Set(dup).size === dup.length;
+        return wrap("走者を置いて再開", body, [
+          el("button", { class: "ghost", text: "キャンセル", onclick: close }),
+          el("button", {
+            class: "primary",
+            text: "この状態で始める",
+            disabled: !ok,
+            onclick: () => commit({ type: "placeRunners", payload: { ...sheet.picks } }, "placeRunners")
+          })
+        ]);
+      }
+      if (sheet.kind === "finalize") {
+        return wrap("試合を確定しますか", el("div", {
+          class: "sub",
+          text: "確定するとイベントの追加・取り消しができなくなり、公式記録（スナップショット）が凍結されます。"
+        }), [
+          el("button", { class: "ghost", text: "やめる", onclick: close }),
+          el("button", { class: "primary", text: "確定する", onclick: finalize })
+        ]);
+      }
+      if (sheet.kind === "reset") {
+        return wrap("入力を破棄して最初からやり直しますか", el("div", {
+          class: "sub",
+          text: "この端末に保存された入力履歴と計測ログを削除します（CSVを出していない場合は失われます）。"
+        }), [
+          el("button", { class: "ghost", text: "やめる", onclick: close }),
+          el("button", { class: "hot", text: "破棄する", onclick: resetAll })
+        ]);
+      }
+      return null;
+    }
+    function batterTable(box, side) {
+      const head = el("tr", {}, ["選手", "打", "安", "点", "得", "四", "三", "率"].map((t) => el("th", { text: t })));
+      const body = el("tbody");
+      for (const b of box[side].batters) {
+        body.append(el("tr", {}, [
+          el("td", { text: `${b.order} ${b.name}` }),
+          ...[b.ab, b.h, b.rbi, b.r, b.bb, b.so].map((v) => el("td", { text: String(v) })),
+          el("td", { text: b.ab ? b.avg.toFixed(3).replace(/^0/, "") : "-" })
+        ]));
+      }
+      const foot = el("tfoot", {}, box[side].pitchers.map((p, i) => el("tr", {}, [
+        el("td", { text: `${i === 0 ? "投" : "継"} ${p.name}` }),
+        el("td", {
+          colspan: 7,
+          text: `${p.ip}回 ${p.pitches}球 被安${p.h} 与四${p.bb}${p.hbp ? ` 与死${p.hbp}` : ""} 奪三${p.so} 失点${p.r}`
+        })
+      ])));
+      return el("div", { class: "scroll-x" }, [el("table", {}, [el("thead", {}, [head]), body, foot])]);
+    }
+    function collapsible(title, openFlag, onToggle, contentFn) {
+      const head = el("button", { class: "collapse-head", onclick: onToggle }, [
+        el("span", { text: title }),
+        el("span", { class: "caret", text: openFlag ? "−" : "＋" })
+      ]);
+      return el("div", { class: "card section" }, [head, openFlag ? contentFn() : null]);
+    }
+    function metricsView(metas) {
+      const rows = paRows(tapLog, metas);
+      const sum = summarize(rows);
+      const evts = activeEvents();
+      const paCsv = toCsv(rows, sum);
+      const pCsv = toPitchCsv(pitchRows(evts, rosters, gameId, scorerId));
+      const tCsv = toTagCsv(tagRows(evts, rosters, gameId, scorerId));
+      const fill = tagFillRate(evts, rosters);
+      const cards = el("div", { class: "metrics" });
+      const items = [
+        ["打席数", sum.paCount],
+        ["1球単位継続率", `${Math.round(sum.pitchModeRate * 100)}%`],
+        ["打席あたりタップ(中央)", sum.tapsPerPaMedian],
+        ["同(最大)", sum.tapsPerPaMax],
+        ["Undo回数", sum.undoTotal],
+        ["投球入力数", sum.pitchInputTotal],
+        ["入力時間合計", `${Math.round(sum.totalElapsedSec)}秒`],
+        ["打球数", fill.battedBalls],
+        ["内容タグ記入率", `${Math.round(fill.fillRate * 100)}%`]
+      ];
+      for (const [k, v] of items) cards.append(el("div", { class: "metric" }, [el("div", { class: "k", text: k }), el("div", { class: "v", text: String(v) })]));
+      return el("div", {}, [
+        cards,
+        el("div", { class: "grid g3 pad" }, [
+          el("button", { text: "打席CSV", onclick: () => download(`a4l-poc-pa-${gameId}.csv`, paCsv) }),
+          el("button", { text: "投球CSV（コース）", onclick: () => download(`a4l-poc-pitch-${gameId}.csv`, pCsv) }),
+          el("button", { text: "打球CSV（タグ）", onclick: () => download(`a4l-poc-batted-${gameId}.csv`, tCsv) })
+        ]),
+        el("div", { class: "sub", text: `フィールド別の記入率: 強さ ${Math.round(fill.byField.strength * 100)}% ／ 高さ ${Math.round(fill.byField.trajectory * 100)}% ／ 方向 ${Math.round(fill.byField.direction * 100)}% ／ 守備 ${Math.round(fill.byField.fieldPlay * 100)}%` }),
+        el("textarea", { rows: 4, readonly: true }, [pCsv])
+      ]);
+    }
+    function resultView(s, box) {
+      const recap = templateRecap(box, rosters);
+      return el("div", {}, [
+        el("div", { class: "card section" }, [el("h2", { text: `${rosters.away.name}（先攻）` }), batterTable(box, "away")]),
+        el("div", { class: "card section" }, [el("h2", { text: `${rosters.home.name}（後攻）` }), batterTable(box, "home")]),
+        el("div", { class: "card section" }, [
+          el("h2", { text: "戦評（集計値から生成・数値の捏造なし）" }),
+          el("div", { class: "recap", text: recap }),
+          el("div", { class: "grid g2 pad" }, [
+            el("button", { text: "戦評をコピー", onclick: () => copy(recap, "戦評をコピーしました") }),
+            el("button", {
+              text: "ローカルLLM用プロンプトをコピー",
+              onclick: () => copy(recapPrompt(box, rosters), "プロンプトをコピーしました（お使いのLLMに貼ってください）")
+            })
+          ])
+        ])
+      ]);
+    }
+    function download(name, text) {
+      try {
+        const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+        const a = el("a", { href: url, download: name });
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1e3);
+        banner = `保存しました: ${name}`;
+      } catch (e) {
+        banner = `保存に失敗しました（${e.message}）。下のテキストをコピーしてください`;
+      }
+      render();
+    }
+    function copy(text, msg) {
+      const fallback = () => {
+        const ta = el("textarea", { style: "position:fixed;opacity:0" }, [text]);
+        document.body.append(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+          banner = msg;
+        } catch {
+          banner = "コピーできませんでした";
+        }
+        ta.remove();
+        render();
+      };
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(() => {
+        banner = msg;
+        render();
+      }, fallback);
+      else fallback();
+    }
+    function render() {
+      const s = state();
+      const acts = availableActions(s);
+      const box = boxScore(activeEvents(), rosters);
+      const { metas, openPitches } = derive();
+      const done = !!finalRecord || s.finished;
+      root.textContent = "";
+      const parts = [
+        el("div", { class: "topline" }, [
+          // A4L のロゴロックアップ（A4L | ATHLETE FOR LIFE）を文字で再現。
+          // シェル（試合一覧などの器）の中では上部に既に出ているので省く
+          showBrand ? el("div", { class: "brand" }, [
+            el("span", { class: "mark", text: "A4L" }),
+            el("span", { class: "rule" }),
+            el("span", { class: "sub" }, [
+              el("div", { text: "ATHLETE" }),
+              el("div", { text: "FOR" }),
+              el("div", { text: "LIFE" })
+            ])
+          ]) : null,
+          el("span", { class: "meta-line", text: `${gameInfo.title}　${gameInfo.venue}　${s.innings}回制` }),
+          finalRecord ? el("span", { class: "tag", text: "FINAL" }) : null,
+          allowRosterEdit ? el("button", {
+            class: `scorer${isDemo ? " unset" : ""}`,
+            text: isDemo ? "名簿を入れる" : "名簿",
+            onclick: () => {
+              tap("open:roster");
+              sheet = {
+                kind: "roster",
+                team: "away",
+                draft: {
+                  away: { name: rosters.away.name, text: teamToText(rosters.away), pitcherId: null },
+                  home: { name: rosters.home.name, text: teamToText(rosters.home), pitcherId: null }
+                },
+                info: { title: gameInfo.title, venue: gameInfo.venue, innings: gameInfo.innings ?? 9 }
+              };
+              render();
+            }
+          }) : null,
+          el("button", {
+            class: "scorer",
+            text: "最初から",
+            onclick: () => {
+              tap("open:reset");
+              sheet = { kind: "reset" };
+              render();
+            }
+          }),
+          el("button", {
+            class: `scorer${scorerId ? "" : " unset"}`,
+            text: scorerId ? `入力者: ${scorerId}` : "入力者を設定",
+            onclick: () => {
+              tap("open:scorer");
+              sheet = { kind: "scorer", value: scorerId };
+              render();
+            }
+          })
+        ]),
+        scoreHeader(s, box),
+        banner ? el("div", { class: `banner ${/^(入力できません|エラー|取り消せません|保存に失敗)/.test(banner) ? "err" : "ok"}`, text: banner }) : null,
+        situationCard(s, box),
+        done ? null : pitchStrip(openPitches),
+        s.finished && !finalRecord ? extraInningsCard(s) : null,
+        done ? null : tagPanel(tagRows(activeEvents(), rosters, gameId, scorerId).at(-1), openPitches),
+        done ? null : el("div", { class: "card input-card" }, [
+          tabBar(acts),
+          tab === "pitch" ? pitchPane(s, acts) : tab === "result" ? resultPane(s) : runnerPane(s, acts)
+        ]),
+        footerBar(s),
+        done ? resultView(s, box) : null,
+        done ? null : audioPanel(s),
+        collapsible("PoC計測（この画面がそのまま測定器）", openMetrics, () => {
+          openMetrics = !openMetrics;
+          render();
+        }, () => metricsView(metas)),
+        el("footer", { text: "A4L SCORING PoC — 合成データのみ / 単一HTMLで動作 / BRAINVERSE" })
+      ];
+      for (const p of parts) if (p) root.append(p);
+      const sv = sheetView(s, acts);
+      if (sv) root.append(sv);
+    }
+    boot();
+    render();
+    if (isSupported()) refreshClips();
+  }
+
+  // src/season.js
+  function seasonStats(games) {
+    if (!games || games.length === 0) {
+      return { batters: [], pitchers: [], teams: [] };
+    }
+    const batterAcc = /* @__PURE__ */ new Map();
+    const pitcherAcc = /* @__PURE__ */ new Map();
+    const teamAcc = /* @__PURE__ */ new Map();
+    for (const game of games) {
+      const score = boxScore(game.events, game.rosters);
+      const { totals, away, home } = score;
+      const awayRuns = totals.away.runs;
+      const homeRuns = totals.home.runs;
+      let result = "draw";
+      if (awayRuns > homeRuns) result = "win";
+      else if (awayRuns < homeRuns) result = "loss";
+      for (const side of ["away", "home"]) {
+        const roster = game.rosters[side];
+        const teamId = roster.teamId;
+        const teamName = roster.name;
+        if (!teamAcc.has(teamId)) {
+          teamAcc.set(teamId, { teamId, name: teamName, games: 0, wins: 0, losses: 0, draws: 0, runs: 0, runsAllowed: 0, hits: 0, playerIds: /* @__PURE__ */ new Set() });
+        }
+        const t = teamAcc.get(teamId);
+        t.games += 1;
+        if (result === "win") t.wins++;
+        else if (result === "loss") t.losses++;
+        else t.draws++;
+        const sideTotals = totals[side];
+        t.runs += sideTotals.runs;
+        t.hits += sideTotals.hits;
+        t.runsAllowed += side === "away" ? homeRuns : awayRuns;
+        for (const p of [...roster.players, ...roster.bench]) {
+          t.playerIds.add(p.playerId);
+        }
+      }
+      for (const side of ["away", "home"]) {
+        const sideData = score[side];
+        const roster = game.rosters[side];
+        for (const b of sideData.batters) {
+          if (!batterAcc.has(b.playerId)) {
+            batterAcc.set(b.playerId, { ...b, pa: 0, ab: 0, h: 0, d2: 0, d3: 0, hr: 0, rbi: 0, r: 0, bb: 0, hbp: 0, so: 0, games: 0, teamId: roster.teamId, teamName: roster.name });
+          }
+          const stat = batterAcc.get(b.playerId);
+          stat.pa += b.pa;
+          stat.ab += b.ab;
+          stat.h += b.h;
+          stat.d2 += b.d2;
+          stat.d3 += b.d3;
+          stat.hr += b.hr;
+          stat.rbi += b.rbi;
+          stat.r += b.r;
+          stat.bb += b.bb;
+          stat.hbp += b.hbp;
+          stat.so += b.so;
+          if (b.pa > 0) stat.games += 1;
+        }
+      }
+      for (const side of ["away", "home"]) {
+        const sideData = score[side];
+        const roster = game.rosters[side];
+        for (const p of sideData.pitchers) {
+          if (!pitcherAcc.has(p.playerId)) {
+            pitcherAcc.set(p.playerId, { ...p, pitches: 0, battersFaced: 0, h: 0, bb: 0, hbp: 0, so: 0, r: 0, outs: 0, ip: "", games: 0, teamId: roster.teamId, teamName: roster.name });
+          }
+          const stat = pitcherAcc.get(p.playerId);
+          stat.pitches += p.pitches;
+          stat.battersFaced += p.battersFaced;
+          stat.h += p.h;
+          stat.bb += p.bb;
+          stat.hbp += p.hbp;
+          stat.so += p.so;
+          stat.r += p.r;
+          stat.outs += p.outs;
+          if (p.outs > 0 || p.pitches > 0 || p.battersFaced > 0) stat.games += 1;
+        }
+      }
+    }
+    for (const t of teamAcc.values()) {
+      for (const pid of t.playerIds) {
+        if (!batterAcc.has(pid)) {
+          batterAcc.set(pid, { playerId: pid, name: "", teamId: t.teamId, teamName: t.name, pa: 0, ab: 0, h: 0, d2: 0, d3: 0, hr: 0, rbi: 0, r: 0, bb: 0, hbp: 0, so: 0, games: 0 });
+        }
+        if (!pitcherAcc.has(pid)) {
+          pitcherAcc.set(pid, { playerId: pid, name: "", teamId: t.teamId, teamName: t.name, pitches: 0, battersFaced: 0, h: 0, bb: 0, hbp: 0, so: 0, r: 0, outs: 0, ip: "", games: 0 });
+        }
+      }
+    }
+    const batters = Array.from(batterAcc.values()).map((b) => {
+      const ab = b.ab || 0;
+      const bb = b.bb || 0;
+      const hbp = b.hbp || 0;
+      const avg = ab > 0 ? b.h / ab : 0;
+      const obpDenom = ab + bb + hbp;
+      const obp = obpDenom > 0 ? (b.h + bb + hbp) / obpDenom : 0;
+      const singles = b.h - b.d2 - b.d3 - b.hr;
+      const totalBases = singles * 1 + b.d2 * 2 + b.d3 * 3 + b.hr * 4;
+      const slg = ab > 0 ? totalBases / ab : 0;
+      const ops = obp + slg;
+      return { ...b, avg, obp, slg, ops };
+    });
+    const pitchers = Array.from(pitcherAcc.values()).map((p) => {
+      const outs = p.outs || 0;
+      return { ...p, ip: `${Math.floor(outs / 3)}.${outs % 3}` };
+    });
+    const teams = Array.from(teamAcc.values()).map((t) => ({
+      teamId: t.teamId,
+      name: t.name,
+      games: t.games,
+      wins: t.wins,
+      losses: t.losses,
+      draws: t.draws,
+      runs: t.runs,
+      runsAllowed: t.runsAllowed,
+      hits: t.hits
+    }));
+    return { batters, pitchers, teams };
+  }
+  function rankings(season, opts = {}) {
+    const minPa = opts.minPa ?? 1;
+    const eligibleBatters = season.batters.filter((b) => b.pa >= minPa);
+    const desc = (statKey, tieKey) => (a, b) => b[statKey] - a[statKey] || b[tieKey] - a[tieKey];
+    return {
+      battingAverage: [...eligibleBatters].sort(desc("avg", "pa")),
+      hits: [...eligibleBatters].sort(desc("h", "pa")),
+      rbi: [...eligibleBatters].sort(desc("rbi", "pa")),
+      homeruns: [...eligibleBatters].sort(desc("hr", "pa")),
+      strikeouts: [...season.pitchers].sort(desc("so", "outs"))
+    };
+  }
+
+  // src/audit.js
+  var ACTION_MAP = {
+    gameStart: "試合開始",
+    pitch: "投球",
+    inPlay: "打球",
+    quickResult: "打席結果",
+    steal: "盗塁",
+    runnerAdvance: "走者",
+    substitute: "代打・守備交代",
+    changePitcher: "投手交代",
+    tag: "打球タグ",
+    setInnings: "回数変更",
+    placeRunners: "走者配置"
+  };
+  var BASE_MAP = { first: "一塁", second: "二塁", third: "三塁" };
+  var RESULT_MAP = { safe: "成功", out: "アウト" };
+  var ADV_MAP = { "1B": "一塁", "2B": "二塁", "3B": "三塁", HOME: "本塁", out: "アウト" };
+  var PITCH_TYPE_MAP = { straight: "ストレート", curve: "カーブ", slider: "スライダー", change: "チェンジ", other: "その他" };
+  var PLAY_TYPE_MAP = {
+    single: "単打",
+    double: "二塁打",
+    triple: "三塁打",
+    homerun: "本塁打",
+    groundOut: "ゴロアウト",
+    flyOut: "飛球アウト",
+    lineOut: "直線アウト",
+    strikeout: "三振",
+    walk: "四球",
+    sacFly: "犠飛",
+    sacBunt: "犠打",
+    doublePlay: "併殺",
+    fieldersChoice: "野選",
+    error: "失策",
+    uncaughtThirdStrike: "振り逃げ",
+    catcherInterference: "打撃妨害",
+    obstruction: "走塁妨害"
+  };
+  var REASON_MAP = { wildPitch: "暴投", passedBall: "捕逸", balk: "ボーク", pickoff: "牽制死", rundown: "挟殺" };
+  function findPlayerName(rosters, id) {
+    if (!rosters || !id) return String(id);
+    const teams = [rosters.away, rosters.home].filter(Boolean);
+    for (const team of teams) {
+      const candidates = [...team.players || [], ...team.bench || []];
+      const p = candidates.find((p2) => p2.id === id || p2.playerId === id);
+      if (p) return p.name;
+    }
+    return String(id);
+  }
+  function buildDetail(event, rosters, revertedEvent) {
+    if (event?.kind === "compensation") {
+      if (revertedEvent) {
+        const revAction = ACTION_MAP[revertedEvent.event?.type] || "その他";
+        return `${revAction} ${buildDetail(revertedEvent, rosters)} を取り消し`;
+      }
+      return "イベントを取り消し";
+    }
+    const { type, payload } = event.event || {};
+    if (!payload) return "";
+    switch (type) {
+      case "pitch": {
+        const resMap = { ball: "ボール", strikeLooking: "見逃しストライク", strikeSwinging: "空振りストライク", foul: "ファウル", hitByPitch: "死球" };
+        let str = resMap[payload.result] || payload.result;
+        if (payload.zone9) str += ` コース${payload.zone9}`;
+        const pt = PITCH_TYPE_MAP[payload.pitchType];
+        if (pt) str += ` (${pt})`;
+        return str;
+      }
+      case "inPlay":
+      case "quickResult": {
+        let str = PLAY_TYPE_MAP[payload.playType] || payload.playType;
+        const adv = payload.advance || payload.targetBase;
+        if (adv && ADV_MAP[adv]) str += ` 打者→${ADV_MAP[adv]}`;
+        return str;
+      }
+      case "steal": {
+        const base = BASE_MAP[payload.from] || payload.from;
+        const res = RESULT_MAP[payload.result] || payload.result;
+        return `${base}から${res}`;
+      }
+      case "runnerAdvance": {
+        const reason = REASON_MAP[payload.reason] || "その他";
+        const adv = payload.advance || payload.targetBase;
+        const advStr = adv && ADV_MAP[adv] ? ` 打者→${ADV_MAP[adv]}` : "";
+        return `${reason}${advStr}`;
+      }
+      case "substitute": {
+        const pid = payload.playerId || payload.id || payload.pid;
+        const name = findPlayerName(rosters, pid);
+        const num = payload.number ?? payload.jerseyNumber ?? "";
+        return num ? `${num}番に ${name}` : name;
+      }
+      case "changePitcher": {
+        const pid = payload.playerId || payload.id || payload.pid;
+        const name = findPlayerName(rosters, pid);
+        return name;
+      }
+      case "compensation": {
+        if (revertedEvent) {
+          const revAction = ACTION_MAP[revertedEvent.event?.type] || "その他";
+          const revDetail = buildDetail(revertedEvent, rosters);
+          return `${revAction} ${revDetail} を取り消し`;
+        }
+        return "イベントを取り消し";
+      }
+      default:
+        return JSON.stringify(payload).slice(1, -1);
+    }
+  }
+  function auditRows(storedEvents, rosters) {
+    if (!storedEvents || !Array.isArray(storedEvents)) return [];
+    const revertedIds = /* @__PURE__ */ new Set();
+    for (const e of storedEvents) {
+      if (e.kind === "compensation" && e.revertsEventId) {
+        revertedIds.add(e.revertsEventId);
+      }
+    }
+    return storedEvents.map((e) => {
+      const isComp = e.kind === "compensation";
+      const action = isComp ? "取り消し" : ACTION_MAP[e.event?.type] || "その他";
+      const at = e.event?.meta?.at ?? "";
+      const by = e.event?.meta?.by ?? "";
+      let revertedEvent = null;
+      if (isComp && e.revertsEventId) {
+        revertedEvent = storedEvents.find((ev) => ev.eventId === e.revertsEventId);
+      }
+      const detail = buildDetail(e, rosters, revertedEvent);
+      const undone = isComp ? false : revertedIds.has(e.eventId);
+      return { seq: e.seq, at, by, action, detail, undone };
+    });
+  }
+  function toAuditCsv(rows) {
+    if (!rows || !Array.isArray(rows)) return "";
+    const escape = (val) => {
+      const str = String(val);
+      if (/[,"\r\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+      return str;
+    };
+    const header = "seq,at,by,action,detail,undone";
+    const body = rows.map((r) => [r.seq, r.at, r.by, r.action, r.detail, String(r.undone)].map(escape).join(","));
+    return [header, ...body].join("\n");
+  }
+
+  // src/consent.js
+  function isConsented(consents, playerId) {
+    return consents?.[playerId] === true;
+  }
+  function setConsent(consents, playerId, value) {
+    return { ...consents, [playerId]: value };
+  }
+  function maskName(player, consents, opts) {
+    if (opts?.mask === false) return player.name;
+    if (isConsented(consents, player.id)) return player.name;
+    return player.number != null ? `#${player.number} 選手` : "選手";
+  }
+  function maskTeam(team, consents, opts) {
+    const newTeam = { ...team };
+    if (team.players) {
+      newTeam.players = team.players.map((p) => ({ ...p, name: maskName(p, consents, opts) }));
+    }
+    if (team.bench) {
+      newTeam.bench = team.bench.map((p) => ({ ...p, name: maskName(p, consents, opts) }));
+    }
+    return newTeam;
+  }
+  function consentSummary(team, consents) {
+    const players = team.players || [];
+    const bench = team.bench || [];
+    const total = players.length + bench.length;
+    const consented = [
+      ...players.filter((p) => isConsented(consents, p.id)),
+      ...bench.filter((p) => isConsented(consents, p.id))
+    ].length;
+    return {
+      total,
+      consented,
+      pending: total - consented,
+      rate: total > 0 ? consented / total : 0
+    };
+  }
+  function pendingPlayers(team, consents) {
+    const players = team.players || [];
+    const bench = team.bench || [];
+    return [...players, ...bench].filter((p) => !isConsented(consents, p.id));
+  }
+
+  // src/repo.js
+  var P = "a4l:v1:";
+  var K = {
+    setup: `${P}setup`,
+    // { rosters, gameInfo }（既存の名簿設定と互換）
+    games: `${P}games`,
+    // 試合の一覧（メタ情報）
+    pool: `${P}pool`,
+    // 個人参加の選手プール
+    teams: `${P}teams`,
+    // チームのライブラリ（大会に3チーム以上いる場合に使う）
+    consents: `${P}consents`,
+    // { [playerId]: boolean }
+    current: `${P}current`,
+    // 入力中の gameId
+    log: (id) => `a4l-poc-${id}`
+    // 試合ごとのイベントログ（既存キーと互換）
+  };
+  var read = (key, fallback) => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  var write = (key, value) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  var loadSetup = () => read(K.setup, null);
+  var loadConsents = () => read(K.consents, {});
+  var saveConsents = (map) => write(K.consents, map ?? {});
+  var loadPool = () => read(K.pool, []);
+  var currentGameId = () => read(K.current, null);
+  var setCurrentGameId = (id) => write(K.current, id);
+  function listGames() {
+    const games = read(K.games, []);
+    return [...games].sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")) || (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  }
+  function getGame(gameId) {
+    return listGames().find((g) => g.gameId === gameId) ?? null;
+  }
+  function upsertGame(meta) {
+    const games = read(K.games, []);
+    const i = games.findIndex((g) => g.gameId === meta.gameId);
+    const next = { createdAt: Date.now(), status: "inProgress", ...meta };
+    if (i >= 0) games[i] = { ...games[i], ...next };
+    else games.push(next);
+    write(K.games, games);
+    return next;
+  }
+  function removeGame(gameId) {
+    write(K.games, read(K.games, []).filter((g) => g.gameId !== gameId));
+    try {
+      localStorage.removeItem(K.log(gameId));
+    } catch {
+    }
+    if (currentGameId() === gameId) setCurrentGameId(null);
+  }
+  var loadGameData = (gameId) => read(K.log(gameId), null);
+  function exportAll() {
+    const games = listGames();
+    return JSON.stringify({
+      format: "a4l-poc-export",
+      version: 1,
+      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      setup: loadSetup(),
+      consents: loadConsents(),
+      pool: loadPool(),
+      games,
+      logs: Object.fromEntries(games.map((g) => [g.gameId, loadGameData(g.gameId)]))
+    }, null, 1);
+  }
+  function importAll(json) {
+    let v;
+    try {
+      v = JSON.parse(json);
+    } catch {
+      return { ok: false, error: "JSONとして読めません" };
+    }
+    if (v?.format !== "a4l-poc-export") return { ok: false, error: "この形式のファイルではありません" };
+    if (v.setup) write(K.setup, v.setup);
+    if (v.consents) write(K.consents, v.consents);
+    if (v.pool) write(K.pool, v.pool);
+    write(K.games, Array.isArray(v.games) ? v.games : []);
+    for (const [id, data] of Object.entries(v.logs ?? {})) if (data) write(K.log(id), data);
+    return { ok: true, games: (v.games ?? []).length };
+  }
+  function newGameId(date) {
+    const d = (date ?? (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).replace(/-/g, "");
+    const used = new Set(listGames().map((g) => g.gameId));
+    for (let n = 1; n < 100; n += 1) {
+      const id = `${d}-${String(n).padStart(2, "0")}`;
+      if (!used.has(id)) return id;
+    }
+    return `${d}-${Date.now()}`;
+  }
+  var loadTeams = () => read(K.teams, []);
+  var saveTeams = (list) => write(K.teams, list ?? []);
+  function upsertTeam(team) {
+    const list = loadTeams();
+    const i = list.findIndex((t) => t.teamId === team.teamId);
+    if (i >= 0) list[i] = team;
+    else list.push(team);
+    saveTeams(list);
+    return team;
+  }
+  function removeTeam(teamId) {
+    saveTeams(loadTeams().filter((t) => t.teamId !== teamId));
+  }
+  function newTeamId() {
+    const used = new Set(loadTeams().map((t) => t.teamId));
+    for (let n = 1; n < 200; n += 1) if (!used.has(`T${n}`)) return `T${n}`;
+    return `T${Date.now()}`;
+  }
+  function migrateTeamsFromSetup(demoRosters) {
+    if (loadTeams().length) return loadTeams();
+    const setup = loadSetup();
+    const src = setup?.rosters ?? demoRosters;
+    const list = [];
+    for (const side of ["away", "home"]) {
+      const t = src?.[side];
+      if (!t?.players?.length) continue;
+      list.push({ ...t, teamId: side === "away" ? "T1" : "T2", isSample: !setup });
+    }
+    if (list.length) saveTeams(list);
+    return list;
+  }
+  function rostersForGame(game, fallback) {
+    const list = loadTeams();
+    const byId = Object.fromEntries(list.map((t) => [t.teamId, t]));
+    const away = byId[game?.awayTeamId], home = byId[game?.homeTeamId];
+    if (away && home) return { away, home };
+    return fallback ?? null;
+  }
+  function appendEvents(gameId, events, reducer, makeInitial) {
+    const data = loadGameData(gameId);
+    if (!data?.log?.length) {
+      return { ok: false, error: "先に入力画面を開いて試合を開始してください" };
+    }
+    if (data.finalized) return { ok: false, error: "確定済みの試合には追記できません" };
+    const active = [];
+    const undone = /* @__PURE__ */ new Set();
+    for (const rec of data.log) {
+      if (rec.kind === "compensation") {
+        for (let i = active.length - 1; i >= 0; i -= 1) if (!undone.has(i)) {
+          undone.add(i);
+          break;
+        }
+      } else active.push(rec.event);
+    }
+    let state = makeInitial();
+    for (const [i, ev] of active.entries()) if (!undone.has(i)) state = reducer(state, ev);
+    const added = [];
+    const skipped = [];
+    for (const ev of events ?? []) {
+      if (ev?.type === "gameStart" && data.log.length) continue;
+      try {
+        state = reducer(state, ev);
+        data.log.push({ kind: "domain", event: ev });
+        added.push(ev);
+      } catch (e) {
+        skipped.push({ event: ev, error: e.message });
+      }
+    }
+    write(K.log(gameId), data);
+    return { ok: true, added: added.length, skipped };
+  }
+
+  // src/shell.js
+  var el2 = (tag, attrs = {}, kids = []) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (v === true) n.setAttribute(k, "");
+      else if (v !== false && v != null) n.setAttribute(k, String(v));
+    }
+    for (const c of [].concat(kids)) if (c != null && c !== false) n.append(c);
+    return n;
+  };
+  var today = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  var NAV = [["home", "試合"], ["score", "入力"], ["season", "通算成績"], ["audit", "履歴"], ["share", "共有"], ["teams", "チーム"]];
+  function mountShell(root, { demoRosters, demoGameInfo, onReload }) {
+    let view = currentGameId() ? "score" : "home";
+    let msg = null;
+    let auditGameId = null, shareGameId = null, teamDraft = null, voiceDraft = null;
+    let newGameAway = null, newGameHome = null;
+    const setup = () => loadSetup();
+    const legacyRosters = () => setup()?.rosters ?? demoRosters;
+    const teams = () => loadTeams();
+    const rostersOf = (game) => (game ? rostersForGame(game, null) : null) ?? legacyRosters();
+    const rosters = () => rostersOf(getGame(currentGameId()));
+    const gameInfo = () => ({ ...demoGameInfo, ...setup()?.gameInfo ?? {} });
+    const isDemo = () => !setup();
+    const eventsOf = (gameId) => {
+      const data = loadGameData(gameId);
+      if (!data?.log) return [];
+      const active = [];
+      const undone = /* @__PURE__ */ new Set();
+      for (const rec of data.log) {
+        if (rec.kind === "compensation") {
+          for (let i = active.length - 1; i >= 0; i -= 1) {
+            if (!undone.has(i)) {
+              undone.add(i);
+              break;
+            }
+          }
+        } else active.push(rec.event);
+      }
+      return active.filter((_, i) => !undone.has(i));
+    };
+    const storedOf = (gameId) => {
+      const data = loadGameData(gameId);
+      if (!data?.log) return [];
+      let seq = 0;
+      return data.log.map((rec) => {
+        seq += 1;
+        return {
+          seq,
+          eventId: `s${seq}`,
+          kind: rec.kind,
+          event: rec.event,
+          revertsEventId: rec.kind === "compensation" ? `s${seq - 1}` : void 0
+        };
+      });
+    };
+    const finishedGames = () => listGames().filter((g) => eventsOf(g.gameId).length > 1);
+    const gameSummary = (g) => {
+      const evts = eventsOf(g.gameId);
+      if (evts.length < 2) return null;
+      try {
+        const r = rostersOf(g);
+        const box = boxScore(evts, r);
+        const st = evts.reduce(appReducer, initialAppState(r));
+        return { box, state: st, score: `${box.totals.away.runs} - ${box.totals.home.runs}` };
+      } catch {
+        return null;
+      }
+    };
+    function homeView() {
+      const info = gameInfo();
+      const wrap = el2("div");
+      wrap.append(el2("div", { class: "card section" }, [
+        el2("h2", { text: "大会" }),
+        el2("div", {}, [
+          el2("div", { class: "sub", text: `${info.title || "（大会名未設定）"}　${info.venue || ""}　${info.innings ?? 7}回制` }),
+          el2("div", { class: "sub", text: `先攻 ${rosters().away.name} ／ 後攻 ${rosters().home.name}` }),
+          teams().some((t) => t.isSample) ? el2("div", { class: "banner warn", text: "見本の名簿が入っています（このまますぐ試合を始められます）。実際の大会では「チーム」タブで名簿を差し替えてください" }) : null
+        ])
+      ]));
+      const list = teams();
+      const form = el2("div", { class: "card section" }, [el2("h2", { text: "新しい試合" })]);
+      const dateInput = el2("input", { type: "text", value: today(), placeholder: "2026-08-23" });
+      const noteInput = el2("input", { type: "text", placeholder: "メモ（1回戦・第2試合 など）" });
+      const body = el2("div");
+      if (list.length >= 2) {
+        newGameAway = newGameAway ?? list[0].teamId;
+        newGameHome = newGameHome ?? list[1].teamId;
+        const picker = (label, current, set) => {
+          body.append(el2("div", { class: "row-label", text: label }));
+          body.append(el2("div", { class: "chips" }, list.map((t) => el2("button", {
+            class: current === t.teamId ? "sel" : "",
+            text: t.name,
+            onclick: () => {
+              set(t.teamId);
+              render();
+            }
+          }))));
+        };
+        picker("先攻", newGameAway, (v) => {
+          newGameAway = v;
+        });
+        picker("後攻", newGameHome, (v) => {
+          newGameHome = v;
+        });
+      } else {
+        body.append(el2("div", { class: "banner warn", text: "チームが2つ以上必要です。「チーム」タブで登録してください" }));
+      }
+      body.append(
+        el2("div", { class: "row-label", text: "日付" }),
+        dateInput,
+        el2("div", { class: "row-label", text: "メモ" }),
+        noteInput
+      );
+      body.append(el2("button", {
+        class: "primary wide",
+        text: "この試合を作って入力へ",
+        disabled: list.length < 2 || newGameAway === newGameHome,
+        onclick: () => {
+          const date = dateInput.value.trim() || today();
+          const gameId = newGameId(date);
+          const away = list.find((t) => t.teamId === newGameAway), home = list.find((t) => t.teamId === newGameHome);
+          upsertGame({
+            gameId,
+            date,
+            note: noteInput.value.trim(),
+            awayTeamId: away.teamId,
+            homeTeamId: home.teamId,
+            awayName: away.name,
+            homeName: home.name,
+            status: "inProgress"
+          });
+          setCurrentGameId(gameId);
+          view = "score";
+          msg = `試合 ${gameId} を作成しました`;
+          render();
+        }
+      }));
+      if (list.length >= 2 && newGameAway === newGameHome) {
+        body.append(el2("div", { class: "sub", text: "同じチーム同士の試合は作れません" }));
+      }
+      form.append(body);
+      wrap.append(form);
+      wrap.append(el2("div", { class: "card section" }, [
+        el2("h2", { text: "音声の文字起こしから取り込む" }),
+        el2("div", {}, [
+          el2("div", { class: "sub", text: "実況を文字起こししてローカルAIでイベント化したJSONを、入力中の試合に取り込みます（内容を確認してから反映します）" }),
+          el2("button", {
+            class: "wide",
+            text: "音声から取り込む",
+            disabled: !currentGameId(),
+            onclick: () => {
+              view = "voice";
+              voiceDraft = { text: "", parsed: null };
+              render();
+            }
+          }),
+          currentGameId() ? null : el2("div", { class: "sub", text: "先に入力する試合を選んでください" })
+        ])
+      ]));
+      const games = listGames();
+      const rowsBox = el2("div");
+      const gamesCard = el2("div", { class: "card section" }, [el2("h2", { text: `試合一覧（${games.length}件）` })]);
+      if (!games.length) rowsBox.append(el2("div", { class: "sub", text: "まだ試合がありません。上の「新しい試合」から作成してください" }));
+      for (const g of games) {
+        const s = gameSummary(g);
+        const isCurrent = currentGameId() === g.gameId;
+        rowsBox.append(el2("div", { class: "gamerow" }, [
+          el2("div", { class: "g-main" }, [
+            el2("div", { class: "g-title", text: `${g.date ?? ""}　${g.awayName} - ${g.homeName}` }),
+            el2("div", { class: "sub", text: `${g.gameId}${g.note ? `／${g.note}` : ""}${s ? `　スコア ${s.score}${s.state.finished ? "（終了）" : "（進行中）"}` : "　未入力"}${isCurrent ? "　◀ 入力中" : ""}` })
+          ]),
+          el2("div", { class: "g-act" }, [
+            el2("button", {
+              text: isCurrent ? "続ける" : "入力する",
+              onclick: () => {
+                setCurrentGameId(g.gameId);
+                view = "score";
+                render();
+              }
+            }),
+            el2("button", { class: "ghost", text: "削除", onclick: () => {
+              if (!confirmDelete(g.gameId)) return;
+              removeGame(g.gameId);
+              msg = `試合 ${g.gameId} を削除しました`;
+              render();
+            } })
+          ])
+        ]));
+      }
+      gamesCard.append(rowsBox);
+      wrap.append(gamesCard);
+      return wrap;
+    }
+    let pendingDelete = null;
+    const confirmDelete = (id) => {
+      if (pendingDelete === id) {
+        pendingDelete = null;
+        return true;
+      }
+      pendingDelete = id;
+      msg = "もう一度「削除」を押すと削除します";
+      render();
+      return false;
+    };
+    function seasonView() {
+      const games = finishedGames().map((g) => ({ gameId: g.gameId, rosters: rostersOf(g), events: eventsOf(g.gameId) }));
+      const wrap = el2("div");
+      if (!games.length) {
+        wrap.append(el2("div", { class: "card section" }, [
+          el2("h2", { text: "通算成績" }),
+          el2("div", { class: "sub", text: "入力済みの試合がまだありません" })
+        ]));
+        return wrap;
+      }
+      let season;
+      try {
+        season = seasonStats(games);
+      } catch (e) {
+        wrap.append(el2("div", { class: "banner err", text: `集計できませんでした: ${e.message}` }));
+        return wrap;
+      }
+      const consents = loadConsents();
+      const allPlayers = /* @__PURE__ */ new Map();
+      for (const t of [...teams(), legacyRosters().away, legacyRosters().home]) {
+        for (const p of [...t.players ?? [], ...t.bench ?? []]) if (!allPlayers.has(p.id)) allPlayers.set(p.id, p);
+      }
+      const nm = (row) => {
+        const p = allPlayers.get(row.playerId);
+        return p ? maskName(p, consents) : row.name;
+      };
+      const table = (title, head, rows, cells2) => {
+        const t = el2("table", {}, [
+          el2("thead", {}, [el2("tr", {}, head.map((h) => el2("th", { text: h })))]),
+          el2("tbody", {}, rows.map((r2) => el2("tr", {}, cells2(r2).map((v, i) => el2("td", { text: String(v) })))))
+        ]);
+        return el2("div", { class: "card section" }, [el2("h2", { text: title }), el2("div", { class: "scroll-x" }, [t])]);
+      };
+      wrap.append(table(
+        `打者（${games.length}試合）`,
+        ["選手", "試", "打席", "打", "安", "本", "点", "四", "三", "率", "OPS"],
+        season.batters.filter((b) => b.pa > 0),
+        (b) => [
+          nm(b),
+          b.games,
+          b.pa,
+          b.ab,
+          b.h,
+          b.hr,
+          b.rbi,
+          b.bb + b.hbp,
+          b.so,
+          b.ab ? b.avg.toFixed(3).replace(/^0/, "") : "-",
+          b.ops ? b.ops.toFixed(3).replace(/^0/, "") : "-"
+        ]
+      ));
+      wrap.append(table(
+        "投手",
+        ["選手", "試", "回", "球", "被安", "四死", "三", "失"],
+        season.pitchers.filter((p) => p.outs > 0 || p.pitches > 0),
+        (p) => [nm(p), p.games, p.ip, p.pitches, p.h, p.bb + p.hbp, p.so, p.r]
+      ));
+      wrap.append(table(
+        "チーム",
+        ["チーム", "試", "勝", "敗", "分", "得点", "失点", "安打"],
+        season.teams,
+        (t) => [t.name, t.games, t.wins, t.losses, t.draws, t.runs, t.runsAllowed, t.hits]
+      ));
+      const r = rankings(season, { minPa: 1 });
+      const top = (label, list, fmt, key) => el2("div", {
+        class: "sub",
+        text: `${label}: ${list.filter((x) => key ? x[key] > 0 : true).slice(0, 3).map((x) => `${nm(x)} ${fmt(x)}`).join("／") || "-"}`
+      });
+      wrap.append(el2("div", { class: "card section" }, [
+        el2("h2", { text: "ランキング（上位3人）" }),
+        el2("div", {}, [
+          top("打率", r.battingAverage, (x) => x.avg.toFixed(3).replace(/^0/, ""), "h"),
+          top("安打", r.hits, (x) => `${x.h}本`, "h"),
+          top("打点", r.rbi, (x) => `${x.rbi}点`, "rbi"),
+          top("本塁打", r.homeruns, (x) => `${x.hr}本`, "hr"),
+          top("奪三振", r.strikeouts, (x) => `${x.so}個`, "so")
+        ])
+      ]));
+      return wrap;
+    }
+    function auditView() {
+      const games = listGames();
+      const gid = auditGameId ?? currentGameId() ?? games[0]?.gameId ?? null;
+      const wrap = el2("div");
+      wrap.append(el2("div", { class: "card section" }, [
+        el2("h2", { text: "変更履歴（監査ログ）" }),
+        el2("div", {}, [
+          el2("div", { class: "sub", text: "記録は追記だけで残ります。取り消しも履歴として残ります" }),
+          el2("div", { class: "chips" }, games.map((g) => el2("button", {
+            class: g.gameId === gid ? "sel" : "",
+            text: `${g.date ?? ""} ${g.gameId}`,
+            onclick: () => {
+              auditGameId = g.gameId;
+              render();
+            }
+          })))
+        ])
+      ]));
+      if (!gid) return wrap;
+      const rows = auditRows(storedOf(gid), rostersOf(getGame(gid)));
+      const fmt = (t) => t ? new Date(Number(t)).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
+      const table = el2("table", {}, [
+        el2("thead", {}, [el2("tr", {}, ["#", "時刻", "入力者", "種別", "内容"].map((h) => el2("th", { text: h })))]),
+        el2("tbody", {}, rows.map((r) => el2("tr", { class: r.undone ? "undone" : "" }, [
+          el2("td", { text: String(r.seq) }),
+          el2("td", { text: fmt(r.at) }),
+          el2("td", { text: r.by || "-" }),
+          el2("td", { text: r.action }),
+          el2("td", { text: r.detail + (r.undone ? "（取り消し済み）" : "") })
+        ])))
+      ]);
+      wrap.append(el2("div", { class: "card section" }, [
+        el2("div", { class: "scroll-x" }, [table]),
+        el2("button", {
+          class: "wide",
+          text: "履歴CSVを保存",
+          onclick: () => download(`a4l-audit-${gid}.csv`, toAuditCsv(rows))
+        })
+      ]));
+      return wrap;
+    }
+    function shareView() {
+      const games = finishedGames();
+      const gid = shareGameId ?? games[0]?.gameId ?? null;
+      const consents = loadConsents();
+      const wrap = el2("div");
+      wrap.append(el2("div", { class: "card section" }, [
+        el2("h2", { text: "結果の確認・共有" }),
+        el2("div", {}, [
+          el2("div", { class: "sub", text: "同意が確認できていない選手は「#背番号 選手」と表示されます（未成年の個人情報を外に出さないため）" }),
+          el2("div", { class: "chips" }, games.map((g) => el2("button", {
+            class: g.gameId === gid ? "sel" : "",
+            text: `${g.date ?? ""} ${g.gameId}`,
+            onclick: () => {
+              shareGameId = g.gameId;
+              render();
+            }
+          })))
+        ])
+      ]));
+      if (gid) {
+        const gr = rostersOf(getGame(gid));
+        const masked = { away: maskTeam(gr.away, consents), home: maskTeam(gr.home, consents) };
+        const evts = eventsOf(gid);
+        const box = boxScore(evts, masked);
+        const lines = Math.max(gameInfo().innings ?? 7, box.linescore.away.length, box.linescore.home.length);
+        const head = el2("tr", {}, [
+          el2("th", { text: "" }),
+          ...Array.from({ length: lines }, (_, i) => el2("th", { text: String(i + 1) })),
+          el2("th", { text: "R" }),
+          el2("th", { text: "H" })
+        ]);
+        const rowOf = (side) => el2("tr", {}, [
+          el2("td", { text: masked[side].name }),
+          ...Array.from({ length: lines }, (_, i) => el2("td", { text: String(box.linescore[side][i] ?? 0) })),
+          el2("td", { text: String(box.totals[side].runs) }),
+          el2("td", { text: String(box.totals[side].hits) })
+        ]);
+        const batters = (side) => el2("div", { class: "scroll-x" }, [el2("table", {}, [
+          el2("thead", {}, [el2("tr", {}, ["選手", "打", "安", "点", "四死", "三"].map((h) => el2("th", { text: h })))]),
+          el2("tbody", {}, box[side].batters.filter((b) => b.pa > 0).map((b) => el2("tr", {}, [
+            el2("td", { text: `${b.order} ${b.name}` }),
+            el2("td", { text: String(b.ab) }),
+            el2("td", { text: String(b.h) }),
+            el2("td", { text: String(b.rbi) }),
+            el2("td", { text: String(b.bb + b.hbp) }),
+            el2("td", { text: String(b.so) })
+          ])))
+        ])]);
+        wrap.append(el2("div", { class: "card section" }, [
+          el2("h2", { text: "スコア" }),
+          el2("div", { class: "scroll-x" }, [el2("table", {}, [el2("thead", {}, [head]), el2("tbody", {}, [rowOf("away"), rowOf("home")])])])
+        ]));
+        wrap.append(el2("div", { class: "card section" }, [el2("h2", { text: masked.away.name }), batters("away")]));
+        wrap.append(el2("div", { class: "card section" }, [el2("h2", { text: masked.home.name }), batters("home")]));
+        wrap.append(el2("div", { class: "card section" }, [
+          el2("h2", { text: "戦評" }),
+          el2("div", { class: "recap", text: templateRecap(box, masked) })
+        ]));
+      }
+      wrap.append(el2("div", { class: "card section" }, [
+        el2("h2", { text: "持ち出し・取り込み" }),
+        el2("div", {}, [
+          el2("div", { class: "sub", text: "大会まるごとJSONで保存できます（端末の入れ替え・バックアップ用）。書き出したファイルは共用PCやクラウドに置かないでください" }),
+          el2("div", { class: "grid g2 pad" }, [
+            el2("button", { text: "大会データを書き出す", onclick: () => download(`a4l-tournament-${today()}.json`, exportAll()) }),
+            el2("button", { class: "ghost", text: "取り込む（貼り付け）", onclick: () => {
+              view = "import";
+              render();
+            } })
+          ])
+        ])
+      ]));
+      return wrap;
+    }
+    function voiceView() {
+      const gid = currentGameId();
+      const d = voiceDraft ?? (voiceDraft = { text: "", parsed: null });
+      const body = el2("div");
+      body.append(el2("div", { class: "sub", text: `取り込み先の試合: ${gid ?? "（未選択）"}　※確定済みの試合には追記できません` }));
+      body.append(el2("textarea", {
+        rows: 8,
+        placeholder: '{"format":"a4l-voice-events", "events":[…]} を貼り付け',
+        oninput: (e) => {
+          d.text = e.target.value;
+        }
+      }, [d.text]));
+      body.append(el2("button", { class: "ghost wide small-link", text: "内容を確認する", onclick: () => {
+        try {
+          const v = JSON.parse(d.text);
+          const evts = (v?.events ?? v ?? []).filter((x) => x?.type && x.type !== "gameStart");
+          d.parsed = { events: evts, error: evts.length ? null : "取り込めるイベントがありません" };
+        } catch (e) {
+          d.parsed = { events: [], error: `JSONとして読めません: ${e.message}` };
+        }
+        render();
+      } }));
+      if (d.parsed?.error) body.append(el2("div", { class: "banner warn", text: d.parsed.error }));
+      if (d.parsed?.events?.length) {
+        const rows = auditRows(
+          d.parsed.events.map((ev, i) => ({ seq: i + 1, eventId: `v${i}`, kind: "domain", event: ev })),
+          rostersOf(getGame(gid))
+        );
+        body.append(el2("div", { class: "row-label", text: `取り込む内容（${rows.length}件）` }));
+        body.append(el2("div", { class: "scroll-x" }, [el2("table", {}, [
+          el2("thead", {}, [el2("tr", {}, ["#", "種別", "内容"].map((h) => el2("th", { text: h })))]),
+          el2("tbody", {}, rows.map((r) => el2("tr", {}, [
+            el2("td", { text: String(r.seq) }),
+            el2("td", { text: r.action }),
+            el2("td", { text: r.detail })
+          ])))
+        ])]));
+        body.append(el2("button", { class: "primary wide", text: "この内容を試合に取り込む", onclick: () => {
+          const r = appendEvents(gid, d.parsed.events, appReducer, () => initialAppState(rostersOf(getGame(gid))));
+          if (!r.ok) {
+            msg = r.error;
+            render();
+            return;
+          }
+          msg = `${r.added}件を取り込みました${r.skipped.length ? `／${r.skipped.length}件は状況に合わないため飛ばしました` : ""}`;
+          voiceDraft = null;
+          view = "score";
+          render();
+        } }));
+      }
+      return el2("div", { class: "card section" }, [
+        el2("h2", { text: "音声から取り込む" }),
+        body,
+        el2("div", {}, [el2("button", { class: "ghost wide", text: "戻る", onclick: () => {
+          view = "home";
+          render();
+        } })])
+      ]);
+    }
+    function importView() {
+      const ta = el2("textarea", { rows: 10, placeholder: "書き出したJSONを貼り付けてください" });
+      return el2("div", { class: "card section" }, [
+        el2("h2", { text: "大会データの取り込み" }),
+        el2("div", {}, [
+          el2("div", { class: "banner warn", text: "取り込むと、いまこの端末にある大会データは置き換わります" }),
+          ta,
+          el2("div", { class: "grid g2 pad" }, [
+            el2("button", { class: "ghost", text: "戻る", onclick: () => {
+              view = "share";
+              render();
+            } }),
+            el2("button", { class: "primary", text: "取り込む", onclick: () => {
+              const r = importAll(ta.value);
+              if (!r.ok) {
+                msg = `取り込めません: ${r.error}`;
+                render();
+                return;
+              }
+              if (typeof onReload === "function") onReload();
+              else {
+                msg = `${r.games}試合を取り込みました`;
+                view = "home";
+                render();
+              }
+            } })
+          ])
+        ])
+      ]);
+    }
+    function teamsView() {
+      const consents = loadConsents();
+      const list = teams();
+      const wrap = el2("div");
+      if (teamDraft) {
+        const parsed = parseRoster(teamDraft.text);
+        const built = buildTeam(
+          teamDraft.teamId,
+          teamDraft.name || "（チーム名未入力）",
+          parsed,
+          { idPrefix: teamDraft.teamId, pitcherId: teamDraft.pitcherId ?? void 0 }
+        );
+        const body = el2("div");
+        body.append(el2("div", { class: "row-label", text: "チーム名" }));
+        body.append(el2("input", {
+          type: "text",
+          value: teamDraft.name,
+          placeholder: "例: 桜ヶ丘ベースボールクラブ",
+          oninput: (e) => {
+            teamDraft.name = e.target.value;
+          }
+        }));
+        body.append(el2("div", { class: "row-label", text: "選手名（貼り付け・1行1人）" }));
+        body.append(el2("textarea", {
+          rows: 8,
+          placeholder: "1 佐藤健二 投\n2 田中大輔\n…（9人以上・10人目以降は控え）",
+          oninput: (e) => {
+            teamDraft.text = e.target.value;
+          }
+        }, [teamDraft.text]));
+        body.append(el2("button", { class: "ghost wide small-link", text: "入力内容を確認する", onclick: () => render() }));
+        for (const m of parsed.errors) body.append(el2("div", { class: "banner warn", text: m }));
+        if (!built) body.append(el2("div", { class: "banner warn", text: `9人以上必要です（いま ${parsed.players.length} 人）` }));
+        else {
+          body.append(el2("div", { class: "sub", text: built.players.map((p, i) => `${i + 1}番 #${p.number} ${p.name}`).join(" ／ ") + (built.bench.length ? `　控え: ${built.bench.map((p) => `#${p.number} ${p.name}`).join(" ")}` : "") }));
+          body.append(el2("div", { class: "row-label", text: "先発投手" }));
+          body.append(el2("div", { class: "chips" }, [...built.players, ...built.bench].map((p) => el2("button", {
+            class: (teamDraft.pitcherId ?? built.pitcherId) === p.id ? "sel" : "",
+            text: p.name,
+            onclick: () => {
+              teamDraft.pitcherId = p.id;
+              render();
+            }
+          }))));
+        }
+        body.append(el2("div", { class: "grid g2 pad" }, [
+          el2("button", { class: "ghost", text: "やめる", onclick: () => {
+            teamDraft = null;
+            render();
+          } }),
+          el2("button", { class: "primary", text: "保存する", disabled: !built, onclick: () => {
+            upsertTeam(built);
+            msg = `${built.name} を保存しました`;
+            teamDraft = null;
+            render();
+          } })
+        ]));
+        wrap.append(el2("div", { class: "card section" }, [el2("h2", { text: "チームの登録・編集" }), body]));
+        return wrap;
+      }
+      wrap.append(el2("div", { class: "card section" }, [
+        el2("h2", { text: `チーム（${list.length}）` }),
+        el2("div", {}, [
+          el2("div", { class: "sub", text: "大会に出るチームを登録します。選手名は貼り付けで取り込めます（Excelのコピペ可）" }),
+          el2("button", { class: "primary wide", text: "チームを追加", onclick: () => {
+            teamDraft = { teamId: newTeamId(), name: "", text: "", pitcherId: null };
+            render();
+          } })
+        ])
+      ]));
+      for (const t of list) {
+        const sum = consentSummary(t, consents);
+        const rows = el2("div");
+        for (const p of [...t.players, ...t.bench ?? []]) {
+          const ok = isConsented(consents, p.id);
+          rows.append(el2("div", { class: "consent-row" }, [
+            el2("span", { text: `#${p.number ?? "-"} ${p.name}` }),
+            el2("button", {
+              class: ok ? "sel" : "",
+              text: ok ? "同意あり" : "未確認",
+              onclick: () => {
+                saveConsents(setConsent(consents, p.id, !ok));
+                render();
+              }
+            })
+          ]));
+        }
+        wrap.append(el2("div", { class: "card section" }, [
+          el2("h2", { text: `${t.name}${t.isSample ? "（見本）" : ""}（${t.players.length}人＋控え${(t.bench ?? []).length}／保護者同意 ${sum.consented}/${sum.total}）` }),
+          el2("div", {}, [
+            sum.pending ? el2("div", { class: "sub", text: `同意 未確認: ${pendingPlayers(t, consents).map((p) => `#${p.number}`).join(" ")}（共有時は氏名を出しません）` }) : null,
+            rows,
+            el2("div", { class: "grid g2 pad" }, [
+              el2("button", { text: "名簿を編集", onclick: () => {
+                teamDraft = { teamId: t.teamId, name: t.name, text: teamToText(t), pitcherId: t.pitcherId };
+                render();
+              } }),
+              el2("button", { class: "ghost", text: "削除", onclick: () => {
+                if (!confirmDelete(`team:${t.teamId}`)) return;
+                removeTeam(t.teamId);
+                msg = `${t.name} を削除しました`;
+                render();
+              } })
+            ])
+          ])
+        ]));
+      }
+      return wrap;
+    }
+    function download(name, text) {
+      try {
+        const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+        const a = el2("a", { href: url, download: name });
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1e3);
+        msg = `保存しました: ${name}`;
+      } catch (e) {
+        msg = `保存に失敗しました（${e.message}）`;
+      }
+      render();
+    }
+    function render() {
+      root.textContent = "";
+      root.append(el2("div", { class: "topline" }, [
+        el2("div", { class: "brand" }, [
+          el2("span", { class: "mark", text: "A4L" }),
+          el2("span", { class: "rule" }),
+          el2("span", { class: "sub" }, [el2("div", { text: "ATHLETE" }), el2("div", { text: "FOR" }), el2("div", { text: "LIFE" })])
+        ]),
+        el2("span", { class: "meta-line", text: `${gameInfo().title || ""}　${currentGameId() ?? ""}` })
+      ]));
+      root.append(el2("nav", { class: "shellnav" }, NAV.map(([key, label]) => el2("button", {
+        class: `navbtn${view === key ? " active" : ""}`,
+        text: label,
+        onclick: () => {
+          view = key;
+          msg = null;
+          pendingDelete = null;
+          render();
+        }
+      }))));
+      if (msg) root.append(el2("div", { class: "banner ok", text: msg }));
+      if (view === "score") {
+        const gid = currentGameId();
+        if (!gid) {
+          root.append(el2("div", { class: "card section" }, [
+            el2("h2", { text: "入力する試合がありません" }),
+            el2("div", {}, [
+              el2("div", { class: "sub", text: "「試合」タブで試合を作成してください" }),
+              el2("button", { class: "wide primary", text: "試合を作る", onclick: () => {
+                view = "home";
+                render();
+              } })
+            ])
+          ]));
+          return;
+        }
+        const holder = el2("div");
+        root.append(holder);
+        mountApp(holder, {
+          rosters: rosters(),
+          gameInfo: { ...gameInfo(), gameId: gid },
+          isDemo: isDemo(),
+          setupKey: "a4l:v1:setup",
+          showBrand: false,
+          allowRosterEdit: false,
+          onSetupSaved: () => {
+            if (typeof onReload === "function") onReload();
+            else render();
+          }
+        });
+        return;
+      }
+      root.append(view === "home" ? homeView() : view === "season" ? seasonView() : view === "audit" ? auditView() : view === "share" ? shareView() : view === "import" ? importView() : view === "voice" ? voiceView() : teamsView());
+    }
+    migrateTeamsFromSetup(demoRosters);
+    render();
+  }
+
+  // app.js
+  mountShell(document.getElementById("app"), {
+    demoRosters: ROSTERS,
+    demoGameInfo: GAME_INFO,
+    onReload: () => location.reload()
+    // 名簿・大会データを入れ替えたら読み直す（選手IDが変わるため）
+  });
+})();
+
+</script>
+</body>
+</html>
