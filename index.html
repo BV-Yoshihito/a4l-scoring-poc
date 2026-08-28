@@ -359,7 +359,8 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
   };
 
   // store-core/src/store.js
-  function createStore(reducer, initial) {
+  function createStore(reducer, initial, opts) {
+    const idPrefix = opts?.idPrefix ? `${opts.idPrefix}-` : "";
     const games = /* @__PURE__ */ new Map();
     let idCounter = 0;
     const get = (gameId) => {
@@ -402,7 +403,7 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
         if (g.finalized) throw new StoreError("GAME_FINALIZED");
         const se = {
           seq: g.log.length + 1,
-          eventId: `ev-${++idCounter}`,
+          eventId: `${idPrefix}ev-${++idCounter}`,
           gameId,
           kind: "domain",
           event: structuredClone(event)
@@ -426,7 +427,7 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
         if (!target) throw new StoreError("NOTHING_TO_UNDO");
         const se = {
           seq: g.log.length + 1,
-          eventId: `ev-${++idCounter}`,
+          eventId: `${idPrefix}ev-${++idCounter}`,
           gameId,
           kind: "compensation",
           revertsEventId: target.eventId
@@ -443,9 +444,9 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
        * @param {{includeAll?:boolean}|undefined} [opts]
        * @returns {StoredEvent[]}
        */
-      getEvents(gameId, opts) {
+      getEvents(gameId, opts2) {
         const g = get(gameId);
-        return structuredClone(opts?.includeAll ? g.log : activeDomain(g));
+        return structuredClone(opts2?.includeAll ? g.log : activeDomain(g));
       },
       /**
        * ゲームの現在状態を返す。
@@ -486,6 +487,30 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
         return g.finalized;
       }
     };
+  }
+
+  // src/device.js
+  var KEY = "a4l:v1:deviceId";
+  var cached = null;
+  function generate() {
+    const rand = () => Math.random().toString(36).slice(2, 8).replace(/[^a-z0-9]/g, "");
+    return `d${Date.now().toString(36)}${rand()}`.replace(/[^A-Za-z0-9]/g, "");
+  }
+  function deviceId() {
+    if (cached) return cached;
+    try {
+      const saved = localStorage.getItem(KEY);
+      if (saved) {
+        cached = saved;
+        return cached;
+      }
+      cached = generate();
+      localStorage.setItem(KEY, cached);
+      return cached;
+    } catch {
+      cached = cached ?? generate();
+      return cached;
+    }
   }
 
   // engine-core/src/types.js
@@ -953,6 +978,82 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
     };
   }
 
+  // src/earnedruns.js
+  var UNEARNED_REASONS = /* @__PURE__ */ new Set(["wildPitch", "passedBall", "balk"]);
+  var BASES_FAR_FIRST = ["third", "second", "first"];
+  function scorersOf(prev, ev) {
+    const out = [];
+    const adv = ev.payload?.advances;
+    if (ev.type === "inPlay" || ev.type === "quickResult" || ev.type === "runnerAdvance") {
+      for (const b of BASES_FAR_FIRST) {
+        if (adv?.[b] === "HOME" && prev.baseRunners[b]) out.push(prev.baseRunners[b]);
+      }
+      if ((ev.type === "inPlay" || ev.type === "quickResult") && adv?.batter === "HOME" && prev.currentBatterId) {
+        out.push(prev.currentBatterId);
+      }
+      return out;
+    }
+    if (ev.type === "pitch" || ev.type === "quickResult") {
+      const b = prev.core.bases;
+      if (b.first && b.second && b.third && prev.baseRunners.third) out.push(prev.baseRunners.third);
+      return out;
+    }
+    if (ev.type === "steal" && ev.payload?.from === "third" && prev.baseRunners.third) {
+      out.push(prev.baseRunners.third);
+    }
+    return out;
+  }
+  function earnedRunReport(domainEvents, rosters) {
+    const byPitcher = {};
+    const defense = {
+      away: { r: 0, er: 0, errors: 0 },
+      home: { r: 0, er: 0, errors: 0 }
+    };
+    const reachedOnError = /* @__PURE__ */ new Set();
+    const row = (id) => {
+      if (id == null) return { r: 0, er: 0 };
+      if (!byPitcher[id]) byPitcher[id] = { r: 0, er: 0 };
+      return byPitcher[id];
+    };
+    let state = initialAppState(rosters);
+    row(state.pitchers.away);
+    row(state.pitchers.home);
+    for (const ev of domainEvents) {
+      const prev = state;
+      state = appReducer(prev, ev);
+      for (const t of ["away", "home"]) {
+        if (prev.pitchers[t] !== state.pitchers[t]) row(state.pitchers[t]);
+      }
+      if (ev.type === "gameStart" || ev.type === "substitute" || ev.type === "changePitcher") continue;
+      const off = prev.core.half === "top" ? "away" : "home";
+      const def = off === "away" ? "home" : "away";
+      const pit = row(prev.pitchers[def]);
+      if (ev.payload?.playType === "error") defense[def].errors += 1;
+      const runDelta = off === "away" ? state.core.awayRuns - prev.core.awayRuns : state.core.homeRuns - prev.core.homeRuns;
+      if (runDelta > 0) {
+        const causeUnearned = ev.type === "runnerAdvance" && UNEARNED_REASONS.has(ev.payload?.reason);
+        const scorers = scorersOf(prev, ev);
+        for (let i = 0; i < runDelta; i += 1) {
+          const id = scorers[i];
+          const unearned = causeUnearned || id != null && reachedOnError.has(id);
+          pit.r += 1;
+          defense[def].r += 1;
+          if (!unearned) {
+            pit.er += 1;
+            defense[def].er += 1;
+          }
+          if (id != null) reachedOnError.delete(id);
+        }
+      }
+      if (ev.payload?.playType === "error") {
+        const bid = prev.currentBatterId;
+        const onBase = bid != null && (state.baseRunners.first === bid || state.baseRunners.second === bid || state.baseRunners.third === bid);
+        if (onBase) reachedOnError.add(bid);
+      }
+    }
+    return { byPitcher, defense };
+  }
+
   // src/stats.js
   var HIT_KIND = { single: null, double: "d2", triple: "d3", homerun: "hr" };
   var BASES = ["first", "second", "third"];
@@ -980,7 +1081,7 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
     if (prevCore.half !== nextCore.half) return 3 - prevCore.outs;
     return nextCore.outs - prevCore.outs;
   }
-  function scorersOf(prev, ev, next) {
+  function scorersOf2(prev, ev, next) {
     const out = [];
     const adv = ev.payload?.advances;
     if (ev.type === "inPlay" || ev.type === "quickResult") {
@@ -1070,7 +1171,7 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
       const runDelta = off === "away" ? state.core.awayRuns - prev.core.awayRuns : state.core.homeRuns - prev.core.homeRuns;
       pit.r += runDelta;
       if (runDelta > 0) {
-        for (const id of scorersOf(prev, ev, state)) {
+        for (const id of scorersOf2(prev, ev, state)) {
           const r = rows.get(id) ?? rowOf(id);
           r.r += 1;
         }
@@ -1119,18 +1220,97 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
       }
       return out;
     };
-    const pitchersOf = (t) => [...pitchRowsByTeam[t].values()].filter((p, i) => i === 0 || p.pitches > 0 || p.battersFaced > 0 || p.outs > 0).map((p) => ({ ...p, ip: `${Math.floor(p.outs / 3)}.${p.outs % 3}` }));
+    const er = earnedRunReport(domainEvents, rosters);
+    const pitchersOf = (t) => [...pitchRowsByTeam[t].values()].filter((p, i) => i === 0 || p.pitches > 0 || p.battersFaced > 0 || p.outs > 0).map((p) => ({ ...p, er: er.byPitcher[p.playerId]?.er ?? 0, ip: `${Math.floor(p.outs / 3)}.${p.outs % 3}` }));
     const teamRuns = { away: state.core.awayRuns, home: state.core.homeRuns };
     const hitsOf = (t) => battersOf(t).reduce((a, b) => a + b.h, 0);
     return {
       linescore: state.linescore,
       totals: {
-        away: { runs: teamRuns.away, hits: hitsOf("away"), errors: 0 },
-        home: { runs: teamRuns.home, hits: hitsOf("home"), errors: 0 }
+        // errors は「そのチームが犯した失策」。スコアボードのE欄と同じ意味
+        away: { runs: teamRuns.away, hits: hitsOf("away"), errors: er.defense.away.errors },
+        home: { runs: teamRuns.home, hits: hitsOf("home"), errors: er.defense.home.errors }
       },
       away: { batters: battersOf("away"), pitchers: pitchersOf("away") },
       home: { batters: battersOf("home"), pitchers: pitchersOf("home") }
     };
+  }
+
+  // src/fieldstats.js
+  var POSITIONS = [
+    { key: "P", label: "投" },
+    { key: "C", label: "捕" },
+    { key: "1B", label: "一" },
+    { key: "2B", label: "二" },
+    { key: "3B", label: "三" },
+    { key: "SS", label: "遊" },
+    { key: "LF", label: "左" },
+    { key: "CF", label: "中" },
+    { key: "RF", label: "右" }
+  ];
+  var POSITION_LABEL = Object.fromEntries(POSITIONS.map((p) => [p.key, p.label]));
+  function positionAssignments(domainEvents) {
+    const out = { away: {}, home: {} };
+    for (const ev of domainEvents ?? []) {
+      if (ev.type !== "positions") continue;
+      const t = ev.payload?.team;
+      if (t !== "away" && t !== "home") continue;
+      out[t] = { ...ev.payload?.map ?? {} };
+    }
+    return out;
+  }
+  function fieldingRows(domainEvents, rosters) {
+    const acc = /* @__PURE__ */ new Map();
+    const current = { away: {}, home: {} };
+    const rowFor = (team, playerId, pos) => {
+      const k = `${team}|${playerId}|${pos}`;
+      if (!acc.has(k)) {
+        const p = playerById(rosters, playerId) ?? { id: playerId, name: "" };
+        acc.set(k, { playerId, name: p.name ?? "", team, pos, outs: 0, errors: 0 });
+      }
+      return acc.get(k);
+    };
+    let state = initialAppState(rosters);
+    for (const ev of domainEvents ?? []) {
+      if (ev.type === "positions") {
+        const t = ev.payload?.team;
+        if (t === "away" || t === "home") {
+          current[t] = { ...ev.payload?.map ?? {} };
+          for (const [pid, ps] of Object.entries(current[t])) rowFor(t, pid, ps);
+        }
+        continue;
+      }
+      const prev = state;
+      state = appReducer(prev, ev);
+      const off = prev.core.half === "top" ? "away" : "home";
+      const def = off === "away" ? "home" : "away";
+      const delta = prev.core.half !== state.core.half ? 3 - prev.core.outs : state.core.outs - prev.core.outs;
+      if (delta > 0) {
+        for (const [pid, ps] of Object.entries(current[def])) rowFor(def, pid, ps).outs += delta;
+      }
+      if (ev.payload?.playType === "error" && ev.payload.errorPos) {
+        const target = Object.entries(current[def]).find(([, ps]) => ps === ev.payload.errorPos);
+        if (target) rowFor(def, target[0], ev.payload.errorPos).errors += 1;
+      }
+    }
+    return [...acc.values()].map((r) => ({ ...r, innings: `${Math.floor(r.outs / 3)}.${r.outs % 3}` }));
+  }
+  function toFieldCsv(rows) {
+    const esc2 = (v) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const head = "選手ID,選手名,守備位置,守備イニング,守備アウト,失策";
+    const body = (rows ?? []).map((r) => [
+      r.playerId,
+      r.name,
+      POSITION_LABEL[r.pos] ?? r.pos,
+      r.innings,
+      r.outs,
+      r.errors
+    ].map(esc2).join(","));
+    return `${[head, ...body].join("\n")}
+`;
   }
 
   // src/recap.js
@@ -1883,7 +2063,7 @@ ${boxData}
     const state = () => store.getState(gameId);
     const activeEvents = () => store.getEvents(gameId).map((e) => e.event);
     function boot() {
-      store = createStore(appReducer, initialAppState(rosters));
+      store = createStore(appReducer, initialAppState(rosters), { idPrefix: deviceId() });
       store.create(gameId);
       const saved = load();
       if (saved) {
@@ -2177,7 +2357,11 @@ ${boxData}
       for (let i = 0; i < n; i++) {
         head.append(el("th", { class: `inn${!s.finished && i + 1 === s.core.inning ? " now" : ""}`, text: String(i + 1) }));
       }
-      head.append(el("th", { class: "rh", text: "R" }), el("th", { class: "rh", text: "H" }));
+      head.append(
+        el("th", { class: "rh", text: "R" }),
+        el("th", { class: "rh", text: "H" }),
+        el("th", { class: "rh", text: "E" })
+      );
       const body = el("tbody");
       for (const side of ["away", "home"]) {
         const tr = el("tr", { class: off === side && !s.finished ? "batting" : "" }, [
@@ -2192,7 +2376,8 @@ ${boxData}
         }
         tr.append(
           el("td", { class: "rh runs", text: String(box.totals[side].runs) }),
-          el("td", { class: "rh", text: String(box.totals[side].hits) })
+          el("td", { class: "rh", text: String(box.totals[side].hits) }),
+          el("td", { class: "rh", text: String(box.totals[side].errors) })
         );
         body.append(tr);
       }
@@ -2974,6 +3159,18 @@ ${boxData}
               sheet.slot = null;
               render();
             }
+          }),
+          el("button", {
+            class: `seg-btn${sheet.mode === "positions" ? " on" : ""}`,
+            text: "守備位置",
+            onclick: () => {
+              sheet.mode = "positions";
+              sheet.playerId = null;
+              sheet.slot = null;
+              const cur = positionAssignments(activeEvents())[sheet.team] ?? {};
+              sheet.posMap = Object.keys(cur).length ? { ...cur } : Object.fromEntries(s.lineup[sheet.team].map((id, i) => [id, POSITIONS[i]?.key]).filter(([, k]) => k));
+              render();
+            }
           })
         ]));
         body.append(el("div", { class: "row-label", text: "チーム" }));
@@ -2987,7 +3184,28 @@ ${boxData}
             render();
           }
         }))));
-        if (sheet.mode === "pitcher") {
+        if (sheet.mode === "positions") {
+          const map = sheet.posMap ?? {};
+          const used = (k) => Object.entries(map).find(([, v]) => v === k)?.[0];
+          body.append(el("div", { class: "sub", text: "いま守っている9人に守備位置を割り当てます。同じ位置は1人までです（記録は集計だけに使い、試合の進行には影響しません）" }));
+          for (const id of s.lineup[sheet.team]) {
+            const pl = playerById(rosters, id);
+            body.append(el("div", { class: "row-label", text: `${pl?.name ?? id}` }));
+            body.append(el("div", { class: "chips" }, POSITIONS.map((x) => el("button", {
+              class: map[id] === x.key ? "sel" : "",
+              text: x.label,
+              onclick: () => {
+                const holder = used(x.key);
+                if (holder && holder !== id) delete map[holder];
+                map[id] = x.key;
+                sheet.posMap = map;
+                render();
+              }
+            }))));
+          }
+          const missing = POSITIONS.filter((x) => !used(x.key)).map((x) => x.label);
+          if (missing.length) body.append(el("div", { class: "banner warn", text: `未割当: ${missing.join(" ")}` }));
+        } else if (sheet.mode === "pitcher") {
           const cur = playerById(rosters, s.pitchers[sheet.team]);
           body.append(el("div", { class: "sub", text: `現在の投手: ${cur?.name ?? "-"}` }));
           body.append(el("div", { class: "row-label", text: "新しい投手" }));
@@ -3021,6 +3239,21 @@ ${boxData}
             }
           }))));
           body.append(el("div", { class: "sub", text: "交代した選手は元に戻せません（記録は交代後の選手に付きます）" }));
+        }
+        if (sheet.mode === "positions") {
+          const n = Object.keys(sheet.posMap ?? {}).length;
+          return wrap("守備位置", body, [
+            el("button", { class: "ghost", text: "キャンセル", onclick: close }),
+            el("button", {
+              class: "primary",
+              text: `記録する（${n}人）`,
+              disabled: n === 0,
+              onclick: () => commit(
+                { type: "positions", payload: { team: sheet.team, map: { ...sheet.posMap } } },
+                `positions:${sheet.team}`
+              )
+            })
+          ]);
         }
         const ready = sheet.mode === "pitcher" ? !!sheet.playerId : sheet.slot !== null && !!sheet.playerId;
         return wrap("選手交代", body, [
@@ -3312,19 +3545,20 @@ ${boxData}
         const teamId = roster.teamId;
         const teamName = roster.name;
         if (!teamAcc.has(teamId)) {
-          teamAcc.set(teamId, { teamId, name: teamName, games: 0, wins: 0, losses: 0, draws: 0, runs: 0, runsAllowed: 0, hits: 0, playerIds: /* @__PURE__ */ new Set() });
+          teamAcc.set(teamId, { teamId, name: teamName, games: 0, wins: 0, losses: 0, draws: 0, runs: 0, runsAllowed: 0, hits: 0, roster: /* @__PURE__ */ new Map() });
         }
         const t = teamAcc.get(teamId);
         t.games += 1;
-        if (result === "win") t.wins++;
-        else if (result === "loss") t.losses++;
+        const own = side === "away" ? result : result === "win" ? "loss" : result === "loss" ? "win" : "draw";
+        if (own === "win") t.wins++;
+        else if (own === "loss") t.losses++;
         else t.draws++;
         const sideTotals = totals[side];
         t.runs += sideTotals.runs;
         t.hits += sideTotals.hits;
         t.runsAllowed += side === "away" ? homeRuns : awayRuns;
-        for (const p of [...roster.players, ...roster.bench]) {
-          t.playerIds.add(p.playerId);
+        for (const p of [...roster.players, ...roster.bench ?? []]) {
+          t.roster.set(p.id, p);
         }
       }
       for (const side of ["away", "home"]) {
@@ -3354,7 +3588,7 @@ ${boxData}
         const roster = game.rosters[side];
         for (const p of sideData.pitchers) {
           if (!pitcherAcc.has(p.playerId)) {
-            pitcherAcc.set(p.playerId, { ...p, pitches: 0, battersFaced: 0, h: 0, bb: 0, hbp: 0, so: 0, r: 0, outs: 0, ip: "", games: 0, teamId: roster.teamId, teamName: roster.name });
+            pitcherAcc.set(p.playerId, { ...p, pitches: 0, battersFaced: 0, h: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, outs: 0, ip: "", games: 0, teamId: roster.teamId, teamName: roster.name });
           }
           const stat = pitcherAcc.get(p.playerId);
           stat.pitches += p.pitches;
@@ -3364,18 +3598,19 @@ ${boxData}
           stat.hbp += p.hbp;
           stat.so += p.so;
           stat.r += p.r;
+          stat.er += p.er ?? 0;
           stat.outs += p.outs;
           if (p.outs > 0 || p.pitches > 0 || p.battersFaced > 0) stat.games += 1;
         }
       }
     }
     for (const t of teamAcc.values()) {
-      for (const pid of t.playerIds) {
+      for (const [pid, p] of t.roster) {
         if (!batterAcc.has(pid)) {
-          batterAcc.set(pid, { playerId: pid, name: "", teamId: t.teamId, teamName: t.name, pa: 0, ab: 0, h: 0, d2: 0, d3: 0, hr: 0, rbi: 0, r: 0, bb: 0, hbp: 0, so: 0, games: 0 });
+          batterAcc.set(pid, { playerId: pid, name: p.name ?? "", number: p.number, teamId: t.teamId, teamName: t.name, pa: 0, ab: 0, h: 0, d2: 0, d3: 0, hr: 0, rbi: 0, r: 0, bb: 0, hbp: 0, so: 0, games: 0 });
         }
         if (!pitcherAcc.has(pid)) {
-          pitcherAcc.set(pid, { playerId: pid, name: "", teamId: t.teamId, teamName: t.name, pitches: 0, battersFaced: 0, h: 0, bb: 0, hbp: 0, so: 0, r: 0, outs: 0, ip: "", games: 0 });
+          pitcherAcc.set(pid, { playerId: pid, name: p.name ?? "", teamId: t.teamId, teamName: t.name, pitches: 0, battersFaced: 0, h: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, outs: 0, ip: "", games: 0 });
         }
       }
     }
@@ -3420,6 +3655,313 @@ ${boxData}
       homeruns: [...eligibleBatters].sort(desc("hr", "pa")),
       strikeouts: [...season.pitchers].sort(desc("so", "outs"))
     };
+  }
+
+  // src/tournament.js
+  function standings(season) {
+    const teams = season?.teams ?? [];
+    const rows = teams.map((t) => {
+      const decided = (t.wins ?? 0) + (t.losses ?? 0);
+      return {
+        teamId: t.teamId,
+        name: t.name,
+        games: t.games ?? 0,
+        wins: t.wins ?? 0,
+        losses: t.losses ?? 0,
+        draws: t.draws ?? 0,
+        winPct: decided > 0 ? (t.wins ?? 0) / decided : 0,
+        runs: t.runs ?? 0,
+        runsAllowed: t.runsAllowed ?? 0,
+        diff: (t.runs ?? 0) - (t.runsAllowed ?? 0)
+      };
+    });
+    rows.sort((a, b) => b.winPct - a.winPct || b.diff - a.diff || b.runs - a.runs || String(a.teamId).localeCompare(String(b.teamId)));
+    const same = (a, b) => a.winPct === b.winPct && a.diff === b.diff && a.runs === b.runs;
+    let rank = 0;
+    return rows.map((r, i) => {
+      if (i === 0 || !same(rows[i - 1], r)) rank = i + 1;
+      return { rank, ...r };
+    });
+  }
+  function progress(rows) {
+    const list = rows ?? [];
+    const total = list.length;
+    let final = 0;
+    let notStarted = 0;
+    let inProgress = 0;
+    for (const g of list) {
+      if (g.finalized) final += 1;
+      else if ((g.eventCount ?? 0) <= 1) notStarted += 1;
+      else inProgress += 1;
+    }
+    return { total, final, inProgress, notStarted, completionRate: total > 0 ? final / total : 0 };
+  }
+  function recentResults(rows, limit = 5) {
+    return [...rows ?? []].filter((g) => g.finalized).sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? ""))).slice(0, limit).map((g) => ({
+      ...g,
+      winner: g.awayRuns > g.homeRuns ? "away" : g.awayRuns < g.homeRuns ? "home" : "draw"
+    }));
+  }
+
+  // src/sync.js
+  var SYNC_FORMAT = "a4l-poc-export";
+  function emptySnapshot() {
+    return { format: SYNC_FORMAT, version: 1, games: [], logs: {}, teams: [], pool: [], consents: {}, setup: null };
+  }
+  var asArray = (v) => Array.isArray(v) ? v : [];
+  var asObject = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  function sameLog(a, b) {
+    const norm = (d) => JSON.stringify({ log: asArray(d?.log), finalized: d?.finalized ?? null });
+    return norm(a) === norm(b);
+  }
+  var eventCount = (d) => asArray(d?.log).length;
+  var isFinal = (d) => !!d?.finalized;
+  function mergeSnapshots(local, incoming) {
+    const base = { ...emptySnapshot(), ...asObject(local) };
+    const inc = asObject(incoming);
+    const merged = {
+      format: SYNC_FORMAT,
+      version: base.version ?? 1,
+      setup: base.setup ?? inc.setup ?? null,
+      // 大会名などは端末側の設定を優先する
+      games: [...asArray(base.games)],
+      logs: { ...asObject(base.logs) },
+      teams: [...asArray(base.teams)],
+      pool: [...asArray(base.pool)],
+      consents: { ...asObject(base.consents) }
+    };
+    const report = { added: [], updated: [], conflicts: [], protected: [], unchanged: [], teamsAdded: [] };
+    const localGames = new Map(asArray(base.games).map((g) => [g.gameId, g]));
+    for (const g of asArray(inc.games)) {
+      if (!g?.gameId) continue;
+      const id = g.gameId;
+      const mine = merged.logs[id];
+      const theirs = asObject(inc.logs)[id] ?? null;
+      if (!localGames.has(id)) {
+        merged.games.push({ ...g });
+        if (theirs) merged.logs[id] = structuredClone(theirs);
+        report.added.push(id);
+        continue;
+      }
+      if (sameLog(mine, theirs)) {
+        report.unchanged.push(id);
+        continue;
+      }
+      if (isFinal(mine)) {
+        if (isFinal(theirs)) report.conflicts.push(id);
+        else report.protected.push(id);
+        continue;
+      }
+      if (isFinal(theirs)) {
+        merged.logs[id] = structuredClone(theirs);
+        report.updated.push(id);
+        continue;
+      }
+      if (eventCount(mine) === 0 && eventCount(theirs) > 0) {
+        merged.logs[id] = structuredClone(theirs);
+        report.updated.push(id);
+      } else {
+        report.conflicts.push(id);
+      }
+    }
+    const haveTeam = new Set(merged.teams.map((t) => t.teamId));
+    for (const t of asArray(inc.teams)) {
+      if (!t?.teamId || haveTeam.has(t.teamId)) continue;
+      merged.teams.push(structuredClone(t));
+      haveTeam.add(t.teamId);
+      report.teamsAdded.push(t.teamId);
+    }
+    const havePool = new Set(merged.pool.map((e) => e.id));
+    for (const e of asArray(inc.pool)) {
+      if (!e?.id || havePool.has(e.id)) continue;
+      merged.pool.push(structuredClone(e));
+      havePool.add(e.id);
+    }
+    for (const [pid, ok] of Object.entries(asObject(inc.consents))) {
+      if (ok === true) merged.consents[pid] = true;
+      else if (!(pid in merged.consents)) merged.consents[pid] = ok;
+    }
+    return { merged, report };
+  }
+  function describeReport(report) {
+    const parts = [];
+    if (report.added.length) parts.push(`追加 ${report.added.length}件`);
+    if (report.updated.length) parts.push(`更新 ${report.updated.length}件`);
+    if (report.unchanged.length) parts.push(`変更なし ${report.unchanged.length}件`);
+    if (report.protected.length) parts.push(`確定済みのため保護 ${report.protected.length}件`);
+    if (report.teamsAdded.length) parts.push(`チーム追加 ${report.teamsAdded.length}件`);
+    if (report.conflicts.length) parts.push(`⚠️ 競合 ${report.conflicts.length}件（${report.conflicts.join(" ")}）`);
+    return parts.length ? parts.join(" ／ ") : "取り込むものがありませんでした";
+  }
+
+  // src/syncclient.js
+  var KEY_URL = "a4l:v1:syncServer";
+  var KEY_LAST = "a4l:v1:syncLast";
+  var KEY_TOKEN = "a4l:v1:syncToken";
+  var read = (k) => {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  };
+  var write = (k, v) => {
+    try {
+      localStorage.setItem(k, v);
+    } catch {
+    }
+  };
+  function serverUrl() {
+    return read(KEY_URL) ?? "";
+  }
+  function setServerUrl(url) {
+    const clean = String(url ?? "").trim().replace(/\/+$/, "");
+    write(KEY_URL, clean);
+    return clean;
+  }
+  function syncToken() {
+    return read(KEY_TOKEN) ?? "";
+  }
+  function setSyncToken(token) {
+    const clean = String(token ?? "").trim();
+    write(KEY_TOKEN, clean);
+    return clean;
+  }
+  function lastSync() {
+    const v = read(KEY_LAST);
+    return v ? Number(v) : null;
+  }
+  async function syncNow({ snapshot, applyMerged, fetchImpl, hasFetch, now }) {
+    const url = serverUrl();
+    if (!url) {
+      return { ok: false, reason: "unconfigured", message: "同期サーバが設定されていません（この端末だけで使えます）" };
+    }
+    const f = fetchImpl ?? (typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : null);
+    const usable = hasFetch === false ? false : typeof f === "function";
+    if (!usable) {
+      return { ok: false, reason: "unsupported", message: "この環境では同期できません（通信機能がありません）" };
+    }
+    const headers = { "content-type": "application/json" };
+    const token = syncToken();
+    if (token) headers.authorization = `Bearer ${token}`;
+    try {
+      headers["x-a4l-device"] = deviceId();
+    } catch {
+    }
+    let res;
+    try {
+      res = await f(`${url}/sync`, { method: "POST", headers, body: JSON.stringify(snapshot) });
+    } catch {
+      return { ok: false, reason: "offline", message: "同期サーバにつながりませんでした（オフラインでもアプリはそのまま使えます）" };
+    }
+    if (res.status === 401) {
+      return { ok: false, reason: "auth", message: "合言葉が違います（大会の合言葉を確認してください）" };
+    }
+    if (!res.ok) {
+      return { ok: false, reason: "server", message: `同期サーバが ${res.status} を返しました` };
+    }
+    let body;
+    try {
+      body = await res.json();
+    } catch {
+      return { ok: false, reason: "server", message: "同期サーバの返事を読めませんでした" };
+    }
+    if (body?.snapshot?.format !== SYNC_FORMAT) {
+      return { ok: false, reason: "server", message: "同期サーバの返事の形が想定と違います" };
+    }
+    applyMerged(body.snapshot);
+    write(KEY_LAST, String(now ?? Date.now()));
+    return { ok: true, message: "同期しました", report: body.report ?? {} };
+  }
+
+  // src/entry.js
+  var ENTRY_STATUS = { APPLIED: "applied", APPROVED: "approved", REJECTED: "rejected", ASSIGNED: "assigned" };
+  var EntryError = class extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "EntryError";
+    }
+  };
+  function generateUniqueId(pool) {
+    let n = 1;
+    while (pool.some((e) => e.id === `P${n}`)) n += 1;
+    return `P${n}`;
+  }
+  function replaceEntry(pool, id, patch) {
+    const index = pool.findIndex((e) => e.id === id);
+    if (index === -1) throw new EntryError("その申込が見つかりません");
+    const next = [...pool];
+    next[index] = { ...pool[index], ...patch };
+    return next;
+  }
+  function applyEntry(pool, input) {
+    const name = typeof input?.name === "string" ? input.name.trim() : "";
+    if (!name) throw new EntryError("氏名を入れてください");
+    const entry = {
+      id: generateUniqueId(pool),
+      name,
+      status: ENTRY_STATUS.APPLIED,
+      appliedAt: Date.now()
+    };
+    for (const k of ["grade", "position", "throws", "bats", "note"]) {
+      if (input?.[k]) entry[k] = input[k];
+    }
+    return { pool: [...pool, entry], entry };
+  }
+  function approveEntry(pool, id) {
+    return replaceEntry(pool, id, { status: ENTRY_STATUS.APPROVED });
+  }
+  function rejectEntry(pool, id, reason) {
+    return replaceEntry(pool, id, { status: ENTRY_STATUS.REJECTED, rejectReason: reason });
+  }
+  function unassign(pool, id) {
+    return replaceEntry(pool, id, { status: ENTRY_STATUS.APPROVED, teamId: null, number: null });
+  }
+  function autoAssign(pool, teamIds) {
+    if (!teamIds || teamIds.length === 0) return pool;
+    const targets = pool.filter((e) => e.status === ENTRY_STATUS.APPROVED).slice().sort((a, b) => String(a.grade ?? "").localeCompare(String(b.grade ?? "")) || (a.appliedAt ?? 0) - (b.appliedAt ?? 0) || String(a.id).localeCompare(String(b.id)));
+    if (targets.length === 0) return pool;
+    const count = new Map(teamIds.map((t) => [t, 0]));
+    const used = new Map(teamIds.map((t) => [t, /* @__PURE__ */ new Set()]));
+    for (const e of pool) {
+      if (e.status !== ENTRY_STATUS.ASSIGNED) continue;
+      if (count.has(e.teamId)) count.set(e.teamId, count.get(e.teamId) + 1);
+      if (used.has(e.teamId) && e.number != null) used.get(e.teamId).add(e.number);
+    }
+    const nextNumber = (teamId) => {
+      const taken = used.get(teamId);
+      let n = 1;
+      while (taken.has(n)) n += 1;
+      taken.add(n);
+      return n;
+    };
+    const assignment = /* @__PURE__ */ new Map();
+    for (const e of targets) {
+      const teamId = teamIds.reduce((best, t) => count.get(t) < count.get(best) ? t : best, teamIds[0]);
+      count.set(teamId, count.get(teamId) + 1);
+      assignment.set(e.id, { teamId, number: nextNumber(teamId) });
+    }
+    return pool.map((e) => {
+      const a = assignment.get(e.id);
+      return a ? { ...e, status: ENTRY_STATUS.ASSIGNED, teamId: a.teamId, number: a.number } : e;
+    });
+  }
+  function entrySummary(pool) {
+    const counts = { applied: 0, approved: 0, rejected: 0, assigned: 0 };
+    for (const e of pool ?? []) {
+      if (e.status in counts) counts[e.status] += 1;
+    }
+    return { total: (pool ?? []).length, ...counts };
+  }
+  function toRoster(pool, teamId, teamName) {
+    const assigned = (pool ?? []).filter((e) => e.status === ENTRY_STATUS.ASSIGNED && e.teamId === teamId).slice().sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+    const toPlayer = (e, order) => ({ id: e.id, name: e.name, number: e.number, order });
+    const starters = assigned.slice(0, 9);
+    const players = starters.map((e, i) => toPlayer(e, i + 1));
+    const bench = assigned.slice(9).map((e) => toPlayer(e, 0));
+    const wanted = starters.find((e) => e.position === "投");
+    const pitcherId = wanted?.id ?? (players.length > 0 ? players[0].id : null);
+    return { teamId, name: teamName, players, bench, pitcherId, shortage: Math.max(0, 9 - players.length) };
   }
 
   // src/audit.js
@@ -3625,7 +4167,7 @@ ${boxData}
     log: (id) => `a4l-poc-${id}`
     // 試合ごとのイベントログ（既存キーと互換）
   };
-  var read = (key, fallback) => {
+  var read2 = (key, fallback) => {
     try {
       const raw = localStorage.getItem(key);
       return raw ? JSON.parse(raw) : fallback;
@@ -3633,7 +4175,7 @@ ${boxData}
       return fallback;
     }
   };
-  var write = (key, value) => {
+  var write2 = (key, value) => {
     try {
       localStorage.setItem(key, JSON.stringify(value));
       return true;
@@ -3641,37 +4183,38 @@ ${boxData}
       return false;
     }
   };
-  var loadSetup = () => read(K.setup, null);
-  var loadConsents = () => read(K.consents, {});
-  var saveConsents = (map) => write(K.consents, map ?? {});
-  var loadPool = () => read(K.pool, []);
-  var currentGameId = () => read(K.current, null);
-  var setCurrentGameId = (id) => write(K.current, id);
+  var loadSetup = () => read2(K.setup, null);
+  var loadConsents = () => read2(K.consents, {});
+  var saveConsents = (map) => write2(K.consents, map ?? {});
+  var loadPool = () => read2(K.pool, []);
+  var savePool = (players) => write2(K.pool, players ?? []);
+  var currentGameId = () => read2(K.current, null);
+  var setCurrentGameId = (id) => write2(K.current, id);
   function listGames() {
-    const games = read(K.games, []);
+    const games = read2(K.games, []);
     return [...games].sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")) || (b.createdAt ?? 0) - (a.createdAt ?? 0));
   }
   function getGame(gameId) {
     return listGames().find((g) => g.gameId === gameId) ?? null;
   }
   function upsertGame(meta) {
-    const games = read(K.games, []);
+    const games = read2(K.games, []);
     const i = games.findIndex((g) => g.gameId === meta.gameId);
     const next = { createdAt: Date.now(), status: "inProgress", ...meta };
     if (i >= 0) games[i] = { ...games[i], ...next };
     else games.push(next);
-    write(K.games, games);
+    write2(K.games, games);
     return next;
   }
   function removeGame(gameId) {
-    write(K.games, read(K.games, []).filter((g) => g.gameId !== gameId));
+    write2(K.games, read2(K.games, []).filter((g) => g.gameId !== gameId));
     try {
       localStorage.removeItem(K.log(gameId));
     } catch {
     }
     if (currentGameId() === gameId) setCurrentGameId(null);
   }
-  var loadGameData = (gameId) => read(K.log(gameId), null);
+  var loadGameData = (gameId) => read2(K.log(gameId), null);
   function exportAll() {
     const games = listGames();
     return JSON.stringify({
@@ -3681,6 +4224,7 @@ ${boxData}
       setup: loadSetup(),
       consents: loadConsents(),
       pool: loadPool(),
+      teams: loadTeams(),
       games,
       logs: Object.fromEntries(games.map((g) => [g.gameId, loadGameData(g.gameId)]))
     }, null, 1);
@@ -3692,25 +4236,34 @@ ${boxData}
     } catch {
       return { ok: false, error: "JSONとして読めません" };
     }
-    if (v?.format !== "a4l-poc-export") return { ok: false, error: "この形式のファイルではありません" };
-    if (v.setup) write(K.setup, v.setup);
-    if (v.consents) write(K.consents, v.consents);
-    if (v.pool) write(K.pool, v.pool);
-    write(K.games, Array.isArray(v.games) ? v.games : []);
-    for (const [id, data] of Object.entries(v.logs ?? {})) if (data) write(K.log(id), data);
-    return { ok: true, games: (v.games ?? []).length };
+    if (v?.format !== SYNC_FORMAT) return { ok: false, error: "この形式のファイルではありません" };
+    const { merged, report } = mergeSnapshots(currentSnapshot(), v);
+    applySnapshot(merged);
+    return { ok: true, games: report.added.length + report.updated.length, report };
+  }
+  function currentSnapshot() {
+    return JSON.parse(exportAll());
+  }
+  function applySnapshot(merged) {
+    if (merged?.setup) write2(K.setup, merged.setup);
+    if (merged?.consents) write2(K.consents, merged.consents);
+    if (merged?.pool) write2(K.pool, merged.pool);
+    if (merged?.teams) write2(K.teams, merged.teams);
+    if (Array.isArray(merged?.games)) write2(K.games, merged.games);
+    for (const [id, data] of Object.entries(merged?.logs ?? {})) if (data) write2(K.log(id), data);
   }
   function newGameId(date) {
     const d = (date ?? (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).replace(/-/g, "");
+    const dev = deviceId();
     const used = new Set(listGames().map((g) => g.gameId));
     for (let n = 1; n < 100; n += 1) {
-      const id = `${d}-${String(n).padStart(2, "0")}`;
+      const id = `${d}-${dev}-${String(n).padStart(2, "0")}`;
       if (!used.has(id)) return id;
     }
-    return `${d}-${Date.now()}`;
+    return `${d}-${dev}-${Date.now()}`;
   }
-  var loadTeams = () => read(K.teams, []);
-  var saveTeams = (list) => write(K.teams, list ?? []);
+  var loadTeams = () => read2(K.teams, []);
+  var saveTeams = (list) => write2(K.teams, list ?? []);
   function upsertTeam(team) {
     const list = loadTeams();
     const i = list.findIndex((t) => t.teamId === team.teamId);
@@ -3777,7 +4330,7 @@ ${boxData}
         skipped.push({ event: ev, error: e.message });
       }
     }
-    write(K.log(gameId), data);
+    write2(K.log(gameId), data);
     return { ok: true, added: added.length, skipped };
   }
 
@@ -3801,6 +4354,8 @@ ${boxData}
     let msg = null;
     let auditGameId = null, shareGameId = null, teamDraft = null, voiceDraft = null;
     let newGameAway = null, newGameHome = null;
+    let entryForm = { name: "", grade: "", position: "" };
+    let syncBusy = false, syncResult = null;
     const setup = () => loadSetup();
     const legacyRosters = () => setup()?.rosters ?? demoRosters;
     const teams = () => loadTeams();
@@ -3989,9 +4544,52 @@ ${boxData}
       render();
       return false;
     };
+    const tournamentRows = () => listGames().map((g) => {
+      const sum = gameSummary(g);
+      return {
+        gameId: g.gameId,
+        date: g.date ?? "",
+        awayName: g.awayName ?? rostersOf(g).away.name,
+        homeName: g.homeName ?? rostersOf(g).home.name,
+        awayRuns: sum?.box.totals.away.runs ?? 0,
+        homeRuns: sum?.box.totals.home.runs ?? 0,
+        finalized: !!loadGameData(g.gameId)?.finalized,
+        eventCount: eventsOf(g.gameId).length
+      };
+    });
+    function progressCard(rows) {
+      const pg = progress(rows);
+      const cards = el2("div", { class: "metrics" });
+      for (const [k, v] of [["試合数", pg.total], ["確定", pg.final], ["入力中", pg.inProgress], ["未着手", pg.notStarted]]) {
+        cards.append(el2("div", { class: "metric" }, [
+          el2("div", { class: "k", text: k }),
+          el2("div", { class: "v", text: String(v) })
+        ]));
+      }
+      return el2("div", { class: "card section" }, [
+        el2("h2", { text: "大会の進行" }),
+        cards,
+        el2("div", { class: "sub", text: `確定率 ${Math.round(pg.completionRate * 100)}%（確定した試合が順位表と直近の結果に入ります）` })
+      ]);
+    }
+    function recentCard(rows) {
+      const list = recentResults(rows);
+      const body = el2("div", { class: "card section" }, [el2("h2", { text: "直近の結果" })]);
+      if (!list.length) {
+        body.append(el2("div", { class: "sub", text: "確定した試合がまだありません。入力画面で試合を確定すると出ます" }));
+        return body;
+      }
+      for (const r of list) {
+        const mark = (side) => r.winner === side ? " ●" : "";
+        body.append(el2("div", { class: "sub", text: `${r.date}　${r.awayName}${mark("away")} ${r.awayRuns} - ${r.homeRuns} ${r.homeName}${mark("home")}` + (r.winner === "draw" ? "　引き分け" : "") }));
+      }
+      return body;
+    }
     function seasonView() {
       const games = finishedGames().map((g) => ({ gameId: g.gameId, rosters: rostersOf(g), events: eventsOf(g.gameId) }));
       const wrap = el2("div");
+      const tRows = tournamentRows();
+      wrap.append(progressCard(tRows));
       if (!games.length) {
         wrap.append(el2("div", { class: "card section" }, [
           el2("h2", { text: "通算成績" }),
@@ -4040,18 +4638,32 @@ ${boxData}
           b.ops ? b.ops.toFixed(3).replace(/^0/, "") : "-"
         ]
       ));
+      const ipUnit = gameInfo().innings ?? 7;
+      const era = (p) => p.outs > 0 ? (p.er * ipUnit * 3 / p.outs).toFixed(2) : "-";
       wrap.append(table(
         "投手",
-        ["選手", "試", "回", "球", "被安", "四死", "三", "失"],
+        ["選手", "試", "回", "球", "被安", "四死", "三", "失", "自責", "防御率"],
         season.pitchers.filter((p) => p.outs > 0 || p.pitches > 0),
-        (p) => [nm(p), p.games, p.ip, p.pitches, p.h, p.bb + p.hbp, p.so, p.r]
+        (p) => [nm(p), p.games, p.ip, p.pitches, p.h, p.bb + p.hbp, p.so, p.r, p.er ?? 0, era(p)]
       ));
       wrap.append(table(
-        "チーム",
-        ["チーム", "試", "勝", "敗", "分", "得点", "失点", "安打"],
-        season.teams,
-        (t) => [t.name, t.games, t.wins, t.losses, t.draws, t.runs, t.runsAllowed, t.hits]
+        "順位表",
+        ["順", "チーム", "試", "勝", "敗", "分", "勝率", "得点", "失点", "差"],
+        standings(season),
+        (r2) => [
+          r2.rank,
+          r2.name,
+          r2.games,
+          r2.wins,
+          r2.losses,
+          r2.draws,
+          r2.winPct.toFixed(3).replace(/^0/, ""),
+          r2.runs,
+          r2.runsAllowed,
+          (r2.diff > 0 ? "+" : "") + r2.diff
+        ]
       ));
+      wrap.append(recentCard(tRows));
       const r = rankings(season, { minPa: 1 });
       const top = (label, list, fmt, key) => el2("div", {
         class: "sub",
@@ -4139,13 +4751,15 @@ ${boxData}
           el2("th", { text: "" }),
           ...Array.from({ length: lines }, (_, i) => el2("th", { text: String(i + 1) })),
           el2("th", { text: "R" }),
-          el2("th", { text: "H" })
+          el2("th", { text: "H" }),
+          el2("th", { text: "E" })
         ]);
         const rowOf = (side) => el2("tr", {}, [
           el2("td", { text: masked[side].name }),
           ...Array.from({ length: lines }, (_, i) => el2("td", { text: String(box.linescore[side][i] ?? 0) })),
           el2("td", { text: String(box.totals[side].runs) }),
-          el2("td", { text: String(box.totals[side].hits) })
+          el2("td", { text: String(box.totals[side].hits) }),
+          el2("td", { text: String(box.totals[side].errors) })
         ]);
         const batters = (side) => el2("div", { class: "scroll-x" }, [el2("table", {}, [
           el2("thead", {}, [el2("tr", {}, ["選手", "打", "安", "点", "四死", "三"].map((h) => el2("th", { text: h })))]),
@@ -4168,7 +4782,29 @@ ${boxData}
           el2("h2", { text: "戦評" }),
           el2("div", { class: "recap", text: templateRecap(box, masked) })
         ]));
+        const fRows = fieldingRows(evts, masked);
+        if (fRows.length) {
+          const fTable = el2("div", { class: "scroll-x" }, [el2("table", {}, [
+            el2("thead", {}, [el2("tr", {}, ["選手", "位置", "守備回", "失策"].map((h) => el2("th", { text: h })))]),
+            el2("tbody", {}, fRows.map((r) => el2("tr", {}, [
+              el2("td", { text: `${masked[r.team].name === masked.away.name ? "先" : "後"} ${r.name}` }),
+              el2("td", { text: POSITION_LABEL[r.pos] ?? r.pos }),
+              el2("td", { text: r.innings }),
+              el2("td", { text: String(r.errors) })
+            ])))
+          ])]);
+          wrap.append(el2("div", { class: "card section" }, [
+            el2("h2", { text: "守備" }),
+            fTable,
+            el2("button", {
+              class: "wide",
+              text: "守備CSVを保存",
+              onclick: () => download(`a4l-field-${gid}.csv`, toFieldCsv(fRows))
+            })
+          ]));
+        }
       }
+      wrap.append(syncCard());
       wrap.append(el2("div", { class: "card section" }, [
         el2("h2", { text: "持ち出し・取り込み" }),
         el2("div", {}, [
@@ -4380,7 +5016,153 @@ ${boxData}
           ])
         ]));
       }
+      wrap.append(entryCard());
       return wrap;
+    }
+    function entryCard() {
+      const pool = loadPool();
+      const sum = entrySummary(pool);
+      const body = el2("div");
+      body.append(el2("div", { class: "sub", text: `申込 ${sum.applied}／承認 ${sum.approved}／編成済 ${sum.assigned}／却下 ${sum.rejected}　（合計 ${sum.total}人）` }));
+      body.append(el2("div", { class: "row-label", text: "氏名（必須）" }));
+      body.append(el2("input", {
+        type: "text",
+        value: entryForm.name,
+        placeholder: "例: 佐藤健二",
+        oninput: (e) => {
+          entryForm.name = e.target.value;
+        }
+      }));
+      body.append(el2("div", { class: "grid g2 pad" }, [
+        el2("input", {
+          type: "text",
+          value: entryForm.grade,
+          placeholder: "学年（任意・例 中2）",
+          oninput: (e) => {
+            entryForm.grade = e.target.value;
+          }
+        }),
+        el2("input", {
+          type: "text",
+          value: entryForm.position,
+          placeholder: "希望ポジション（任意・例 投）",
+          oninput: (e) => {
+            entryForm.position = e.target.value;
+          }
+        })
+      ]));
+      body.append(el2("button", { class: "primary wide", text: "この選手を申込に追加", onclick: () => {
+        try {
+          const r = applyEntry(pool, { name: entryForm.name, grade: entryForm.grade, position: entryForm.position });
+          savePool(r.pool);
+          entryForm = { name: "", grade: "", position: "" };
+          msg = `${r.entry.name} を申込に追加しました`;
+        } catch (e) {
+          msg = e instanceof EntryError ? e.message : `追加できませんでした（${e.message}）`;
+        }
+        render();
+      } }));
+      const save = (next, message) => {
+        savePool(next);
+        msg = message;
+        render();
+      };
+      const teamName = (id) => teams().find((t) => t.teamId === id)?.name ?? id;
+      for (const e of pool) {
+        const label = `${e.name}${e.grade ? `（${e.grade}）` : ""}${e.position ? ` 希望:${e.position}` : ""}`;
+        const ops = el2("div", { class: "chips" });
+        if (e.status === ENTRY_STATUS.APPLIED || e.status === ENTRY_STATUS.REJECTED) {
+          ops.append(el2("button", { text: "承認", onclick: () => save(approveEntry(pool, e.id), `${e.name} を承認しました`) }));
+        }
+        if (e.status !== ENTRY_STATUS.REJECTED) {
+          ops.append(el2("button", {
+            class: "ghost",
+            text: "却下",
+            onclick: () => save(rejectEntry(pool, e.id, "主催者判断"), `${e.name} を却下しました`)
+          }));
+        }
+        if (e.status === ENTRY_STATUS.ASSIGNED) {
+          ops.append(el2("button", {
+            class: "ghost",
+            text: "編成を外す",
+            onclick: () => save(unassign(pool, e.id), `${e.name} の編成を外しました`)
+          }));
+        }
+        const state = e.status === ENTRY_STATUS.ASSIGNED ? `${teamName(e.teamId)} #${e.number}` : e.status === ENTRY_STATUS.APPROVED ? "承認済み" : e.status === ENTRY_STATUS.REJECTED ? `却下（${e.rejectReason ?? "理由なし"}）` : "申込";
+        body.append(el2("div", { class: "consent-row" }, [el2("span", { text: `${label} — ${state}` })]));
+        body.append(ops);
+      }
+      const ids = teams().map((t) => t.teamId);
+      if (sum.approved > 0 && ids.length > 0) {
+        body.append(el2("button", {
+          class: "wide",
+          text: `承認済み ${sum.approved}人を登録チーム${ids.length}つに振り分ける`,
+          onclick: () => save(autoAssign(pool, ids), `${sum.approved}人を振り分けました`)
+        }));
+      }
+      if (sum.assigned > 0) {
+        body.append(el2("div", { class: "row-label", text: "編成結果をチーム名簿に反映する" }));
+        for (const id of [...new Set(pool.filter((e) => e.status === ENTRY_STATUS.ASSIGNED).map((e) => e.teamId))]) {
+          const r = toRoster(pool, id, teamName(id));
+          body.append(el2("button", {
+            class: "ghost wide",
+            disabled: r.shortage > 0,
+            text: r.shortage > 0 ? `${teamName(id)}: あと${r.shortage}人必要（いま${r.players.length}人）` : `${teamName(id)} の名簿を作る（${r.players.length}人＋控え${r.bench.length}）`,
+            onclick: () => {
+              upsertTeam({ ...r, name: teamName(id) });
+              msg = `${teamName(id)} の名簿を個人参加の編成から作りました`;
+              render();
+            }
+          }));
+        }
+      }
+      if (!ids.length) {
+        body.append(el2("div", { class: "banner warn", text: "先にチームを1つ以上登録すると、振り分けができます" }));
+      }
+      return el2("div", { class: "card section" }, [el2("h2", { text: "個人参加のエントリー" }), body]);
+    }
+    function syncCard() {
+      const url = serverUrl();
+      const last = lastSync();
+      const body = el2("div");
+      body.append(el2("div", { class: "sub", text: url ? "同期先が設定されています。オフラインでもアプリはそのまま使えます（つながった時にまとめて合流します）" : "同期先は未設定です。この端末だけで完結して動きます。設定するまで外部への通信は一切行いません" }));
+      body.append(el2("div", { class: "banner warn", text: "PoC中は仮データだけを入れてください。実在の選手の氏名・連絡先は入れないでください" }));
+      body.append(el2("div", { class: "row-label", text: "同期サーバのアドレス" }));
+      const input = el2("input", { type: "text", value: url, placeholder: "例: http://192.168.1.10:8932" });
+      body.append(input);
+      body.append(el2("div", { class: "row-label", text: "大会の合言葉" }));
+      const tokenInput = el2("input", { type: "password", value: syncToken(), placeholder: "主催者から渡された合言葉" });
+      body.append(tokenInput);
+      body.append(el2("div", { class: "sub", text: "合言葉を知っている端末だけがつながります。この端末の中に保存されます" }));
+      body.append(el2("div", { class: "grid g2 pad" }, [
+        el2("button", { text: "保存", onclick: () => {
+          const v = setServerUrl(input.value);
+          setSyncToken(tokenInput.value);
+          msg = v ? `同期先を ${v} にしました` : "同期先を未設定に戻しました";
+          syncResult = null;
+          render();
+        } }),
+        el2("button", {
+          class: "primary",
+          text: syncBusy ? "同期中…" : "いま同期する",
+          disabled: syncBusy || !url,
+          onclick: async () => {
+            syncBusy = true;
+            syncResult = null;
+            render();
+            const r = await syncNow({
+              snapshot: currentSnapshot(),
+              applyMerged: (merged) => applySnapshot(merged)
+            });
+            syncBusy = false;
+            syncResult = r.ok ? `${r.message}：${describeReport(r.report)}` : r.message;
+            render();
+          }
+        })
+      ]));
+      if (last) body.append(el2("div", { class: "sub", text: `最後に同期できたのは ${new Date(last).toLocaleString("ja-JP")}` }));
+      if (syncResult) body.append(el2("div", { class: "banner ok", text: syncResult }));
+      return el2("div", { class: "card section" }, [el2("h2", { text: "同期" }), body]);
     }
     function download(name, text) {
       try {
