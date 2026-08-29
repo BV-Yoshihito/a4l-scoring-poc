@@ -1384,34 +1384,46 @@ ${boxData}
     return { taps: [] };
   }
   function recordTap(log, tap) {
-    return { ...log, taps: [...log.taps || [], tap] };
+    const taps = log?.taps || [];
+    return { ...log, taps: [...taps, tap] };
   }
   function paRows(log, paMetas) {
-    const metas = paMetas || [];
-    const tapsBySeq = /* @__PURE__ */ new Map();
-    for (const tap of log.taps || []) {
-      if (!tapsBySeq.has(tap.paSeq)) tapsBySeq.set(tap.paSeq, []);
-      tapsBySeq.get(tap.paSeq).push(tap);
+    if (!paMetas) return [];
+    const taps = log?.taps || [];
+    const tapsByPa = /* @__PURE__ */ new Map();
+    for (const tap of taps) {
+      if (tap.paSeq == null || tap.t == null) continue;
+      if (!tapsByPa.has(tap.paSeq)) tapsByPa.set(tap.paSeq, []);
+      tapsByPa.get(tap.paSeq).push(tap);
     }
-    return metas.map((meta) => {
-      const seqTaps = tapsBySeq.get(meta.paSeq) || [];
-      const tapCount = seqTaps.length;
-      let elapsedSec = 0;
-      if (tapCount > 1) {
+    return paMetas.map((meta) => {
+      const metaTaps = tapsByPa.get(meta.paSeq) || [];
+      const tapCount = metaTaps.length;
+      let startedAt = null, endedAt = null, elapsedSec = 0, undoCount = 0;
+      if (tapCount > 0) {
         let minT = Infinity, maxT = -Infinity;
-        for (const t of seqTaps) {
-          if (t.t < minT) minT = t.t;
-          if (t.t > maxT) maxT = t.t;
+        for (const tap of metaTaps) {
+          if (tap.t < minT) minT = tap.t;
+          if (tap.t > maxT) maxT = tap.t;
+          if (tap.action === "undo") undoCount++;
         }
+        startedAt = minT;
+        endedAt = maxT;
         elapsedSec = (maxT - minT) / 1e3;
       }
-      const undoCount = seqTaps.filter((t) => t.action === "undo").length;
-      return { ...meta, tapCount, elapsedSec, undoCount };
+      return {
+        ...meta,
+        tapCount,
+        elapsedSec,
+        startedAt,
+        endedAt,
+        undoCount,
+        scorerId: meta.scorerId || log?.scorerId || ""
+      };
     });
   }
   function summarize(rows) {
-    const paCount = (rows || []).length;
-    if (paCount === 0) {
+    if (!rows || rows.length === 0) {
       return {
         totalElapsedSec: 0,
         paCount: 0,
@@ -1422,51 +1434,73 @@ ${boxData}
         pitchInputTotal: 0
       };
     }
-    const tapCounts = rows.map((r) => r.tapCount);
-    const sortedTaps = [...tapCounts].sort((a, b) => a - b);
-    const mid = Math.floor(sortedTaps.length / 2);
-    const tapsPerPaMedian = sortedTaps.length % 2 === 0 ? (sortedTaps[mid - 1] + sortedTaps[mid]) / 2 : sortedTaps[mid];
-    const pitchModeRate = rows.filter((r) => r.mode === "pitch").length / paCount;
+    const n = rows.length;
+    let totalElapsedSec = 0;
+    let pitchCountRows = 0;
+    let maxTapCount = 0;
+    let undoTotal = 0;
+    let pitchInputTotal = 0;
+    const tapCounts = [];
+    for (const row of rows) {
+      totalElapsedSec += row.elapsedSec || 0;
+      if (row.mode === "pitch") pitchCountRows++;
+      const tc = row.tapCount || 0;
+      tapCounts.push(tc);
+      if (tc > maxTapCount) maxTapCount = tc;
+      undoTotal += row.undoCount || 0;
+      pitchInputTotal += row.pitchCount || 0;
+    }
+    tapCounts.sort((a, b) => a - b);
+    const median = n % 2 === 1 ? tapCounts[Math.floor(n / 2)] : (tapCounts[n / 2 - 1] + tapCounts[n / 2]) / 2;
     return {
-      totalElapsedSec: rows.reduce((sum, r) => sum + (r.elapsedSec || 0), 0),
-      paCount,
-      pitchModeRate,
-      tapsPerPaMedian,
-      tapsPerPaMax: Math.max(...tapCounts),
-      undoTotal: rows.reduce((sum, r) => sum + (r.undoCount || 0), 0),
-      pitchInputTotal: rows.reduce((sum, r) => sum + (r.pitchCount || 0), 0)
+      totalElapsedSec,
+      paCount: n,
+      pitchModeRate: pitchCountRows / n,
+      tapsPerPaMedian: median,
+      tapsPerPaMax: maxTapCount,
+      undoTotal,
+      pitchInputTotal
     };
   }
   function toCsv(rows, summary) {
-    const header = "scorerId,gameId,paSeq,inning,half,battingTeam,batterId,batterName,mode,pitchCount,tapCount,elapsedSec,undoCount,resultPlayType,outsAfter,runsScored";
+    const HEADER = "scorerId,gameId,paSeq,inning,half,battingTeam,batterId,batterName,mode,pitchCount,tapCount,elapsedSec,startedAt,endedAt,undoCount,resultPlayType,outsAfter,runsScored";
     const escape = (val) => {
-      const s = String(val);
-      return /[,"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      if (val === null || val === void 0) return "";
+      const str = String(val);
+      if (/[,"\n]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
+      return str;
     };
-    const lines = [header];
-    for (const row of rows || []) {
-      lines.push([
-        row.scorerId ?? "",
-        row.gameId,
-        row.paSeq,
-        row.inning,
-        row.half,
-        row.battingTeam,
-        row.batterId,
-        row.batterName,
-        row.mode,
-        row.pitchCount,
-        row.tapCount,
-        row.elapsedSec,
-        row.undoCount,
-        row.resultPlayType,
-        row.outsAfter,
-        row.runsScored
-      ].map(escape).join(","));
+    const lines = [HEADER];
+    if (rows && rows.length > 0) {
+      for (const row of rows) {
+        const vals = [
+          escape(row.scorerId),
+          escape(row.gameId),
+          escape(row.paSeq),
+          escape(row.inning),
+          escape(row.half),
+          escape(row.battingTeam),
+          escape(row.batterId),
+          escape(row.batterName),
+          escape(row.mode),
+          escape(row.pitchCount),
+          escape(row.tapCount),
+          escape(row.elapsedSec),
+          row.startedAt === null ? "" : escape(row.startedAt),
+          row.endedAt === null ? "" : escape(row.endedAt),
+          escape(row.undoCount),
+          escape(row.resultPlayType),
+          escape(row.outsAfter),
+          escape(row.runsScored)
+        ];
+        lines.push(vals.join(","));
+      }
     }
     lines.push("");
-    for (const [key, value] of Object.entries(summary || {})) {
-      lines.push(`${escape(key)},${escape(value)}`);
+    if (summary) {
+      for (const [key, value] of Object.entries(summary)) {
+        lines.push(`${escape(key)},${escape(value)}`);
+      }
     }
     return lines.join("\n");
   }
@@ -2632,7 +2666,7 @@ ${boxData}
       const plan = quickCommitPlan(s, playType);
       const hasRunner = BASES3.some((b) => s.baseRunners[b]);
       const ambiguous = hasRunner && AMBIGUOUS_WITH_RUNNER.has(playType);
-      if (plan.ok && !ambiguous) {
+      if (plan.ok && !ambiguous && playType !== "error") {
         commit({ type: "inPlay", payload: { playType, advances: plan.advances } }, `result:${playType}`);
         return;
       }
@@ -2944,6 +2978,18 @@ ${boxData}
             })
           ]));
         }
+        if (sheet.playType === "error") {
+          body.append(el("div", { class: "row-label", text: "失策した守備位置（任意）" }));
+          body.append(el("div", { class: "chips" }, POSITIONS.map((x) => el("button", {
+            class: sheet.errorPos === x.key ? "sel" : "",
+            text: x.label,
+            onclick: () => {
+              sheet.errorPos = sheet.errorPos === x.key ? null : x.key;
+              render();
+            }
+          }))));
+          body.append(el("div", { class: "sub", text: "選ばなくても記録できます（後から履歴で確認できます）" }));
+        }
         return wrap(`${PLAY_LABEL[sheet.playType] ?? sheet.playType} の行き先`, body, [
           el("button", { class: "ghost", text: "キャンセル", onclick: close }),
           el("button", {
@@ -2952,7 +2998,8 @@ ${boxData}
             onclick: () => sheet.fix ? commitFix() : commit({ type: "inPlay", payload: {
               playType: sheet.playType,
               advances: sheet.adv,
-              forceThirdOut: sheet.forceThirdOut === true
+              forceThirdOut: sheet.forceThirdOut === true,
+              ...sheet.errorPos ? { errorPos: sheet.errorPos } : {}
             } }, `adv:${sheet.playType}`)
           })
         ]);
@@ -3701,6 +3748,154 @@ ${boxData}
       ...g,
       winner: g.awayRuns > g.homeRuns ? "away" : g.awayRuns < g.homeRuns ? "home" : "draw"
     }));
+  }
+
+  // src/runstate.js
+  function stateKey(bases, outs) {
+    const b = `${bases?.first ? "1" : "_"}${bases?.second ? "2" : "_"}${bases?.third ? "3" : "_"}`;
+    return `${b}/${outs}`;
+  }
+  var STATE_KEYS = (() => {
+    const keys = [];
+    for (let outs = 0; outs <= 2; outs += 1) {
+      for (let mask = 0; mask < 8; mask += 1) {
+        keys.push(stateKey({ first: !!(mask & 1), second: !!(mask & 2), third: !!(mask & 4) }, outs));
+      }
+    }
+    return keys;
+  })();
+  var STRIKE_RESULTS2 = /* @__PURE__ */ new Set(["strikeSwinging", "strikeLooking"]);
+  function endsPlateAppearance(ev, prev, next) {
+    const pt = ev.payload?.playType;
+    if (ev.type === "inPlay" || ev.type === "quickResult") return true;
+    if (ev.type === "pitch") {
+      const r = ev.payload?.result;
+      if (r === "hitByPitch") return true;
+      if (r === "ball" && next.core.balls === 0) return true;
+      if (STRIKE_RESULTS2.has(r) && next.core.strikes === 0) return true;
+    }
+    return false;
+  }
+  function plateAppearanceStates(domainEvents, rosters) {
+    const rows = [];
+    let state = initialAppState(rosters);
+    let paSeq = 0;
+    let openRows = [];
+    let halfStartRuns = null;
+    let halfKey = null;
+    const runsOf = (s, team) => team === "away" ? s.core.awayRuns : s.core.homeRuns;
+    const closeHalf = (endRuns) => {
+      for (const r of openRows) {
+        r.runsRestOfInning = endRuns - r._runsAtStart;
+        r.complete = true;
+        delete r._runsAtStart;
+      }
+      openRows = [];
+    };
+    let paOpenState = null;
+    for (const ev of domainEvents ?? []) {
+      const prev = state;
+      state = appReducer(prev, ev);
+      if (ev.type === "gameStart" || ev.type === "substitute" || ev.type === "changePitcher") continue;
+      const off = prev.core.half === "top" ? "away" : "home";
+      const def = off === "away" ? "home" : "away";
+      const key = `${prev.core.inning}${prev.core.half}`;
+      if (halfKey !== null && key !== halfKey) {
+        closeHalf(halfStartRuns.endRuns ?? halfStartRuns.value);
+        halfKey = null;
+      }
+      if (halfKey === null) {
+        halfKey = key;
+        halfStartRuns = { team: off, value: runsOf(prev, off) };
+      }
+      if (paOpenState === null) {
+        paOpenState = {
+          inning: prev.core.inning,
+          half: prev.core.half,
+          battingTeam: off,
+          batterId: prev.currentBatterId,
+          pitcherId: prev.pitchers[def],
+          bases: { ...prev.core.bases },
+          outs: prev.core.outs,
+          runsAtStart: runsOf(prev, off)
+        };
+      }
+      if (endsPlateAppearance(ev, prev, state)) {
+        paSeq += 1;
+        const halfEnded = prev.core.half !== state.core.half || state.finished;
+        const row = {
+          paSeq,
+          inning: paOpenState.inning,
+          half: paOpenState.half,
+          battingTeam: paOpenState.battingTeam,
+          batterId: paOpenState.batterId,
+          pitcherId: paOpenState.pitcherId,
+          state: stateKey(paOpenState.bases, paOpenState.outs),
+          bases: paOpenState.bases,
+          outs: paOpenState.outs,
+          endState: halfEnded ? null : stateKey(state.core.bases, state.core.outs),
+          runsOnPlay: runsOf(state, off) - runsOf(prev, off),
+          runsRestOfInning: 0,
+          complete: false,
+          _runsAtStart: paOpenState.runsAtStart
+        };
+        rows.push(row);
+        openRows.push(row);
+        paOpenState = null;
+        if (prev.core.half !== state.core.half || state.finished) {
+          closeHalf(runsOf(state, off));
+          halfKey = null;
+        }
+      }
+    }
+    for (const r of openRows) delete r._runsAtStart;
+    for (const r of rows) if ("_runsAtStart" in r) delete r._runsAtStart;
+    return rows;
+  }
+
+  // src/sabermetrics.js
+  function runExpectancy(rows) {
+    const result = {};
+    for (const key of STATE_KEYS) {
+      result[key] = { mean: 0, count: 0 };
+    }
+    if (!rows || rows.length === 0) {
+      return result;
+    }
+    for (const row of rows) {
+      if (row.complete !== true) continue;
+      const state = row.state;
+      if (!result.hasOwnProperty(state)) continue;
+      const current = result[state];
+      current.count += 1;
+      current.mean = (current.mean * (current.count - 1) + row.runsRestOfInning) / current.count;
+    }
+    return result;
+  }
+  function runValue(row, re) {
+    const after = row.endState ? re[row.endState]?.mean ?? 0 : 0;
+    const before = re[row.state]?.mean ?? 0;
+    return after - before + row.runsOnPlay;
+  }
+  function batterRunValues(rows, re) {
+    if (!rows || rows.length === 0) return [];
+    const batterMap = /* @__PURE__ */ new Map();
+    for (const row of rows) {
+      if (row.complete !== true) continue;
+      const batterId = row.batterId;
+      if (!batterMap.has(batterId)) {
+        batterMap.set(batterId, { pa: 0, runValue: 0 });
+      }
+      const batter = batterMap.get(batterId);
+      batter.pa += 1;
+      batter.runValue += runValue(row, re);
+    }
+    return Array.from(batterMap.entries()).map(([batterId, { pa, runValue: runValue2 }]) => ({
+      batterId,
+      pa,
+      runValue: runValue2,
+      runValuePerPa: pa > 0 ? runValue2 / pa : 0
+    })).sort((a, b) => b.runValue - a.runValue);
   }
 
   // src/sync.js
@@ -4585,6 +4780,11 @@ ${boxData}
       }
       return body;
     }
+    function stateLabel(key) {
+      const [bases, outs] = key.split("/");
+      const on = [bases[0] === "1" ? "一" : "", bases[1] === "2" ? "二" : "", bases[2] === "3" ? "三" : ""].join("");
+      return `${on ? `${on}塁` : "走者なし"} ${outs}死`;
+    }
     function seasonView() {
       const games = finishedGames().map((g) => ({ gameId: g.gameId, rosters: rostersOf(g), events: eventsOf(g.gameId) }));
       const wrap = el2("div");
@@ -4664,6 +4864,44 @@ ${boxData}
         ]
       ));
       wrap.append(recentCard(tRows));
+      const paRows2 = games.flatMap((g) => plateAppearanceStates(g.events, g.rosters));
+      const done = paRows2.filter((x) => x.complete);
+      if (done.length) {
+        const re = runExpectancy(done);
+        const seen = Object.entries(re).filter(([, v]) => v.count > 0).sort((a, b) => b[1].mean - a[1].mean);
+        const sabWrap = el2("div", {});
+        sabWrap.append(el2("div", { class: "sub", text: `観測できた状態: ${seen.length} / 24　（${done.length}打席ぶん）` }));
+        if (seen.length < 24 || done.length < 500) {
+          sabWrap.append(el2("div", { class: "banner warn", text: "試合数が少ないうちは、めったに起きない状況（二死満塁など）の数字が大きく振れます。傾向を見る程度に留めてください" }));
+        }
+        const reTable = el2("div", { class: "scroll-x" }, [el2("table", {}, [
+          el2("thead", {}, [el2("tr", {}, ["状況", "期待得点", "打席"].map((h) => el2("th", { text: h })))]),
+          el2("tbody", {}, seen.slice(0, 12).map(([k, v]) => el2("tr", {}, [
+            el2("td", { text: stateLabel(k) }),
+            el2("td", { text: v.mean.toFixed(2) }),
+            el2("td", { text: String(v.count) })
+          ])))
+        ])]);
+        sabWrap.append(reTable);
+        wrap.append(el2("div", { class: "card section" }, [
+          el2("h2", { text: "得点期待値（24状態）" }),
+          sabWrap
+        ]));
+        const bv = batterRunValues(done, re);
+        if (bv.length) {
+          wrap.append(table(
+            "選手ごとの得点価値",
+            ["選手", "打席", "得点価値", "1打席あたり"],
+            bv.slice(0, 15),
+            (b) => [
+              nm({ playerId: b.batterId, name: b.batterId }),
+              b.pa,
+              (b.runValue > 0 ? "+" : "") + b.runValue.toFixed(2),
+              (b.runValuePerPa > 0 ? "+" : "") + b.runValuePerPa.toFixed(3)
+            ]
+          ));
+        }
+      }
       const r = rankings(season, { minPa: 1 });
       const top = (label, list, fmt, key) => el2("div", {
         class: "sub",
