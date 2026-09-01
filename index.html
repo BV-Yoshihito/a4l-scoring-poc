@@ -1003,13 +1003,15 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
     }
     return out;
   }
-  function earnedRunReport(domainEvents, rosters) {
+  function earnedRunReport(domainEvents, rosters, opts = {}) {
+    const inherited = opts.chargeInheritedRunners === true;
     const byPitcher = {};
     const defense = {
       away: { r: 0, er: 0, errors: 0 },
       home: { r: 0, er: 0, errors: 0 }
     };
     const reachedOnError = /* @__PURE__ */ new Set();
+    const responsible = /* @__PURE__ */ new Map();
     const row = (id) => {
       if (id == null) return { r: 0, er: 0 };
       if (!byPitcher[id]) byPitcher[id] = { r: 0, er: 0 };
@@ -1027,7 +1029,8 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
       if (ev.type === "gameStart" || ev.type === "substitute" || ev.type === "changePitcher") continue;
       const off = prev.core.half === "top" ? "away" : "home";
       const def = off === "away" ? "home" : "away";
-      const pit = row(prev.pitchers[def]);
+      const onMound = prev.pitchers[def];
+      const pit = row(onMound);
       if (ev.payload?.playType === "error") defense[def].errors += 1;
       const runDelta = off === "away" ? state.core.awayRuns - prev.core.awayRuns : state.core.homeRuns - prev.core.homeRuns;
       if (runDelta > 0) {
@@ -1036,10 +1039,11 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
         for (let i = 0; i < runDelta; i += 1) {
           const id = scorers[i];
           const unearned = causeUnearned || id != null && reachedOnError.has(id);
-          pit.r += 1;
+          const charged = inherited && id != null && responsible.has(id) ? row(responsible.get(id)) : pit;
+          charged.r += 1;
           defense[def].r += 1;
           if (!unearned) {
-            pit.er += 1;
+            charged.er += 1;
             defense[def].er += 1;
           }
           if (id != null) reachedOnError.delete(id);
@@ -1049,6 +1053,11 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
         const bid = prev.currentBatterId;
         const onBase = bid != null && (state.baseRunners.first === bid || state.baseRunners.second === bid || state.baseRunners.third === bid);
         if (onBase) reachedOnError.add(bid);
+      }
+      if (inherited) {
+        const onBase = new Set([state.baseRunners.first, state.baseRunners.second, state.baseRunners.third].filter((x) => x != null));
+        for (const id of [...responsible.keys()]) if (!onBase.has(id)) responsible.delete(id);
+        for (const id of onBase) if (!responsible.has(id)) responsible.set(id, onMound);
       }
     }
     return { byPitcher, defense };
@@ -1117,7 +1126,7 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
     }
     return 0;
   }
-  function boxScore(domainEvents, rosters) {
+  function boxScore(domainEvents, rosters, opts = {}) {
     const rows = /* @__PURE__ */ new Map();
     const rowOf = (id) => {
       if (!rows.has(id)) {
@@ -1220,8 +1229,13 @@ tr.undone td { color: var(--faint); text-decoration: line-through; }
       }
       return out;
     };
-    const er = earnedRunReport(domainEvents, rosters);
-    const pitchersOf = (t) => [...pitchRowsByTeam[t].values()].filter((p, i) => i === 0 || p.pitches > 0 || p.battersFaced > 0 || p.outs > 0).map((p) => ({ ...p, er: er.byPitcher[p.playerId]?.er ?? 0, ip: `${Math.floor(p.outs / 3)}.${p.outs % 3}` }));
+    const er = earnedRunReport(domainEvents, rosters, opts);
+    const pitchersOf = (t) => [...pitchRowsByTeam[t].values()].filter((p, i) => i === 0 || p.pitches > 0 || p.battersFaced > 0 || p.outs > 0).map((p) => ({
+      ...p,
+      r: opts.chargeInheritedRunners === true ? er.byPitcher[p.playerId]?.r ?? 0 : p.r,
+      er: er.byPitcher[p.playerId]?.er ?? 0,
+      ip: `${Math.floor(p.outs / 3)}.${p.outs % 3}`
+    }));
     const teamRuns = { away: state.core.awayRuns, home: state.core.homeRuns };
     const hitsOf = (t) => battersOf(t).reduce((a, b) => a + b.h, 0);
     return {
@@ -3572,7 +3586,7 @@ ${boxData}
   }
 
   // src/season.js
-  function seasonStats(games) {
+  function seasonStats(games, opts = {}) {
     if (!games || games.length === 0) {
       return { batters: [], pitchers: [], teams: [] };
     }
@@ -3580,7 +3594,7 @@ ${boxData}
     const pitcherAcc = /* @__PURE__ */ new Map();
     const teamAcc = /* @__PURE__ */ new Map();
     for (const game of games) {
-      const score = boxScore(game.events, game.rosters);
+      const score = boxScore(game.events, game.rosters, opts);
       const { totals, away, home } = score;
       const awayRuns = totals.away.runs;
       const homeRuns = totals.home.runs;
@@ -4551,6 +4565,7 @@ ${boxData}
     let newGameAway = null, newGameHome = null;
     let entryForm = { name: "", grade: "", position: "" };
     let syncBusy = false, syncResult = null;
+    let inheritedRunners = false;
     const setup = () => loadSetup();
     const legacyRosters = () => setup()?.rosters ?? demoRosters;
     const teams = () => loadTeams();
@@ -4799,7 +4814,7 @@ ${boxData}
       }
       let season;
       try {
-        season = seasonStats(games);
+        season = seasonStats(games, { chargeInheritedRunners: inheritedRunners });
       } catch (e) {
         wrap.append(el2("div", { class: "banner err", text: `集計できませんでした: ${e.message}` }));
         return wrap;
@@ -4840,12 +4855,22 @@ ${boxData}
       ));
       const ipUnit = gameInfo().innings ?? 7;
       const era = (p) => p.outs > 0 ? (p.er * ipUnit * 3 / p.outs).toFixed(2) : "-";
-      wrap.append(table(
+      const pitcherCard = table(
         "投手",
         ["選手", "試", "回", "球", "被安", "四死", "三", "失", "自責", "防御率"],
         season.pitchers.filter((p) => p.outs > 0 || p.pitches > 0),
         (p) => [nm(p), p.games, p.ip, p.pitches, p.h, p.bb + p.hbp, p.so, p.r, p.er ?? 0, era(p)]
-      ));
+      );
+      pitcherCard.append(el2("div", { class: "sub", text: inheritedRunners ? "責任投手ルール：継承走者が還った失点は、その走者を塁に出した投手に付いています" : "失点はその時マウンドにいた投手に付いています（既定）" }));
+      pitcherCard.append(el2("button", {
+        class: inheritedRunners ? "sel" : "ghost",
+        text: inheritedRunners ? "責任投手ルール：オン" : "責任投手ルール：オフ",
+        onclick: () => {
+          inheritedRunners = !inheritedRunners;
+          render();
+        }
+      }));
+      wrap.append(pitcherCard);
       wrap.append(table(
         "順位表",
         ["順", "チーム", "試", "勝", "敗", "分", "勝率", "得点", "失点", "差"],
