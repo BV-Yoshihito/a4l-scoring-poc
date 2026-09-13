@@ -1600,6 +1600,16 @@ ${boxData}
     return true;
   }
 
+  // src/voicematch.js
+  var normalize = (text) => String(text ?? "").replace(/[\s、。・「」]/g, "");
+  var SYNONYMS = { 本塁打: "homerun" };
+  var NORMALIZED_LABELS = new Map(RESULT_PALETTE.map((p) => [normalize(p.label), p.key]));
+  function matchResultLabel(text) {
+    const norm = normalize(text);
+    if (!norm) return null;
+    return NORMALIZED_LABELS.get(norm) ?? SYNONYMS[norm] ?? null;
+  }
+
   // src/zone.js
   function isValid(col, row) {
     return col >= 0 && col <= 4 && row >= 0 && row <= 4;
@@ -2099,6 +2109,7 @@ ${boxData}
     let tab = "pitch", mode = "simple", swing = "looking", pitchType = "";
     let scorerId = "", openFielding = false, openTags = true;
     let recorder = null, recStartedAt = 0, clips = [], openAudio = false;
+    let voiceListening = false;
     let openMetrics = false;
     const players = [
       ...rosters.away.players,
@@ -2325,6 +2336,43 @@ ${boxData}
         recorder?.stop();
       } catch {
         recorder = null;
+        render();
+      }
+    }
+    function startVoiceResult(s) {
+      const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+      if (!SR || voiceListening) return;
+      const rec = new SR();
+      rec.lang = "ja-JP";
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      voiceListening = true;
+      banner = null;
+      render();
+      rec.onresult = (ev) => {
+        const text = ev.results[0][0].transcript;
+        const key = matchResultLabel(text);
+        if (key && isPaletteEnabled(s, key)) {
+          tap("voice:result");
+          onResult(s, key);
+        } else if (key) {
+          banner = `エラー: 「${PLAY_LABEL[key]}」はいまの状況では選べません`;
+        } else {
+          banner = `聞き取れませんでした（「${text}」）。結果の名前をそのまま話すか、タップしてください`;
+        }
+      };
+      rec.onerror = (ev) => {
+        banner = `エラー: 音声を認識できませんでした（${ev.error}）`;
+      };
+      rec.onend = () => {
+        voiceListening = false;
+        render();
+      };
+      try {
+        rec.start();
+      } catch (e) {
+        voiceListening = false;
+        banner = `エラー: ${e.message}`;
         render();
       }
     }
@@ -2661,6 +2709,16 @@ ${boxData}
       if (s.finished || !s.currentBatterId) {
         pane.append(el("div", { class: "sub", text: "打者がいないため結果は入力できません" }));
         return pane;
+      }
+      const voiceSupported = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+      if (voiceSupported) {
+        pane.append(el("button", {
+          class: `wide ${voiceListening ? "sel" : "ghost"}`,
+          disabled: voiceListening,
+          text: voiceListening ? "🎙️ 聞いています…" : "🎙️ 音声で入力する（試験版）",
+          onclick: () => startVoiceResult(s)
+        }));
+        pane.append(el("div", { class: "sub", text: "結果の名前（「単打」「三振」「四球」など）をそのまま話してください" }));
       }
       for (const group of ["hit", "out", "other"]) {
         const items = RESULT_PALETTE.filter((p) => p.group === group);
