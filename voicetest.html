@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>音声認識オフライン診断</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+JP:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f7f6f3; --surface:#ffffff; --surface-2:#f0eee9;
+    --ink:#1b1d1e; --sub:#65696c; --line:#e1dfda; --line-strong:#cfccc4;
+    --accent:#2f6f5e; --accent-ink:#ffffff; --accent-soft:#e6efec;
+    --warn:#93650f; --warn-soft:#faf1de;
+    --bad:#a4392d; --bad-soft:#fbe9e6;
+    --shadow: 0 1px 2px rgba(20,20,18,0.04), 0 1px 0 rgba(20,20,18,0.03);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#151716; --surface:#1d201f; --surface-2:#242726;
+      --ink:#eef0ee; --sub:#9aa09c; --line:#33362f; --line-strong:#45483f;
+      --accent:#6fbfa3; --accent-ink:#0c1613; --accent-soft:#20302a;
+      --warn:#e0b355; --warn-soft:#2e2718;
+      --bad:#e3796a; --bad-soft:#331e1a;
+      --shadow: 0 1px 2px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#151716; --surface:#1d201f; --surface-2:#242726;
+    --ink:#eef0ee; --sub:#9aa09c; --line:#33362f; --line-strong:#45483f;
+    --accent:#6fbfa3; --accent-ink:#0c1613; --accent-soft:#20302a;
+    --warn:#e0b355; --warn-soft:#2e2718;
+    --bad:#e3796a; --bad-soft:#331e1a;
+    --shadow: 0 1px 2px rgba(0,0,0,0.35);
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"IBM Plex Sans JP","IBM Plex Sans",-apple-system,BlinkMacSystemFont,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:640px; margin:0 auto; padding:28px 18px 64px}
+
+  .masthead{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+    border-bottom:1px solid var(--line-strong); padding-bottom:14px; margin-bottom:6px}
+  .masthead .eyebrow{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.08em;
+    color:var(--sub); text-transform:uppercase}
+  h1{font-size:21px; font-weight:700; margin:2px 0 0; letter-spacing:-.01em; text-wrap:balance}
+  .lede{color:var(--sub); font-size:13.5px; margin:8px 0 22px; max-width:56ch}
+
+  .panel{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    box-shadow:var(--shadow); padding:16px 18px; margin-bottom:14px}
+  .panel h2{font-size:14px; font-weight:600; margin:0 0 10px; display:flex; align-items:center; gap:8px}
+
+  /* --- 対応状況パネル：計器読み取り風に等幅で並べる --- */
+  .readout{font-family:"IBM Plex Mono",monospace; font-size:12.5px; display:grid;
+    grid-template-columns:auto 1fr; gap:4px 14px; background:var(--surface-2);
+    border-radius:8px; padding:12px 14px}
+  .readout dt{color:var(--sub)}
+  .readout dd{margin:0; font-weight:500}
+  .dot{display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; vertical-align:1px}
+  .dot.on{background:var(--accent)}
+  .dot.off{background:var(--bad)}
+  .ua{font-family:"IBM Plex Mono",monospace; font-size:10px; color:var(--sub); word-break:break-all;
+    margin-top:10px; line-height:1.5}
+
+  /* --- 手順ステップ --- */
+  .step-head{display:flex; align-items:center; gap:10px; margin-bottom:8px}
+  .step-num{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:13px;
+    width:24px; height:24px; border-radius:50%; background:var(--ink); color:var(--bg);
+    display:flex; align-items:center; justify-content:center; flex:none}
+  .step-title{font-size:15px; font-weight:600}
+  .step-note{font-size:13px; color:var(--sub); margin:0 0 12px}
+  .step-note strong{color:var(--ink)}
+
+  button.run{width:100%; padding:14px; font-size:15px; font-weight:600; border:none;
+    border-radius:9px; background:var(--ink); color:var(--bg); font-family:inherit;
+    transition:opacity .15s}
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) button.run{background:var(--accent); color:var(--accent-ink)} }
+  :root[data-theme="dark"] button.run{background:var(--accent); color:var(--accent-ink)}
+  button.run:active{opacity:.7}
+  button.run:disabled{opacity:.35}
+  button.run:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  .status{margin-top:10px; padding:11px 13px; border-radius:8px; font-size:13.5px;
+    font-family:"IBM Plex Mono",monospace; white-space:pre-wrap; word-break:break-word}
+  .st-idle{background:var(--surface-2); color:var(--sub)}
+  .st-listening{background:var(--warn-soft); color:var(--warn)}
+  .st-ok{background:var(--accent-soft); color:var(--accent)}
+  .st-error{background:var(--bad-soft); color:var(--bad)}
+
+  /* --- ログ --- */
+  .logrow{border-bottom:1px solid var(--line); padding:10px 0; font-size:13px}
+  .logrow:last-child{border-bottom:none}
+  .logrow .tag{font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.04em;
+    text-transform:uppercase; color:var(--sub); display:inline-block; min-width:64px}
+  .logrow .val{font-weight:600}
+  .logrow .meta{color:var(--sub); font-size:12px; margin-top:2px}
+  .empty{color:var(--sub); font-size:13px}
+
+  button.ghost{width:100%; padding:12px; font-size:14px; font-weight:600; border-radius:9px;
+    border:1px solid var(--line-strong); background:transparent; color:var(--ink); font-family:inherit;
+    margin-top:12px}
+  button.ghost:active{background:var(--surface-2)}
+  .copymsg{font-size:12.5px; color:var(--sub); margin-top:8px; min-height:1.4em}
+
+  footer{margin-top:24px; font-size:11.5px; color:var(--sub); text-align:center}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+
+  <div class="masthead">
+    <div>
+      <div class="eyebrow">A4L Scoring App — Speech Input</div>
+      <h1>音声認識オフライン診断</h1>
+    </div>
+  </div>
+  <p class="lede">この端末・このブラウザで、音声認識が通信なしで動くかを確認します。マイクの音声はこのページの外へは送信しません。</p>
+
+  <div class="panel">
+    <h2>対応状況</h2>
+    <dl class="readout" id="feat">
+      <dt>読み込み中</dt><dd>確認中…</dd>
+    </dl>
+    <div class="ua" id="ua"></div>
+  </div>
+
+  <div class="panel">
+    <div class="step-head"><span class="step-num">1</span><span class="step-title">通常の通信状態で試す</span></div>
+    <p class="step-note">ボタンを押し、マイクの許可が出たら<strong>「ストレート」「セーフ」</strong>など短い言葉を話してください。</p>
+    <button class="run" id="btn1" onclick="runTest('通信ON')">① 音声認識をためす</button>
+    <div id="status1" class="status st-idle">まだ試していません</div>
+  </div>
+
+  <div class="panel">
+    <div class="step-head"><span class="step-num">2</span><span class="step-title">機内モードにしてから、もう一度</span></div>
+    <p class="step-note">設定 → 機内モードON → この画面に戻り、同じボタンで同じ言葉を。<strong>ここでも認識できれば端末内だけで完結</strong>している証拠です。</p>
+    <button class="run" id="btn2" onclick="runTest('機内モード')">② 機内モードで再びためす</button>
+    <div id="status2" class="status st-idle">まだ試していません</div>
+  </div>
+
+  <div class="panel">
+    <h2>記録</h2>
+    <div id="log"><div class="empty">まだ記録がありません</div></div>
+    <button class="ghost" onclick="copyLog()">結果をコピーする</button>
+    <div id="copyMsg" class="copymsg"></div>
+  </div>
+
+  <footer>このページは何も外部へ送信しません（音声認識そのものの通信有無を除く）</footer>
+</div>
+
+<script>
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const info = {
+  ua: navigator.userAgent,
+  secureContext: window.isSecureContext,
+  SpeechRecognition_API: !!SR,
+  webGPU: !!navigator.gpu,
+  getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+};
+
+const featEl = document.getElementById('feat');
+const rows = [
+  ['音声認識API', info.SpeechRecognition_API],
+  ['getUserMedia', info.getUserMedia],
+  ['WebGPU', info.webGPU],
+  ['secureContext', info.secureContext],
+];
+featEl.innerHTML = rows.map(([label, on]) =>
+  `<dt><span class="dot ${on ? 'on' : 'off'}"></span>${label}</dt><dd>${on ? 'あり' : '無し'}</dd>`
+).join('');
+document.getElementById('ua').textContent = info.ua;
+
+const entries = [];
+const ERROR_NOTE = {
+  network: 'network＝クラウド認識に依存（機内モードで出たら、端末内では動かない証拠）',
+  'not-allowed': 'マイクの権限が拒否されました（設定アプリで許可してください）',
+  'service-not-allowed': 'この端末・ブラウザでは音声認識サービスが使えません',
+  'no-speech': '発話が検出されませんでした（もう一度、はっきり言ってみてください）',
+  'language-not-supported': 'この言語（ja-JP）に対応していません',
+  aborted: '途中で中断されました',
+};
+
+function renderLog() {
+  const el = document.getElementById('log');
+  if (!entries.length) { el.innerHTML = '<div class="empty">まだ記録がありません</div>'; return; }
+  el.innerHTML = entries.map(e => `
+    <div class="logrow">
+      <span class="tag">${e.label}</span><span class="val">${e.result}</span>
+      <div class="meta">${e.detail || '—'} ／ ${e.ms}ms</div>
+    </div>`).join('');
+}
+
+function runTest(label) {
+  const statusId = label === '通信ON' ? 'status1' : 'status2';
+  const btnId = label === '通信ON' ? 'btn1' : 'btn2';
+  const statusEl = document.getElementById(statusId);
+  const btnEl = document.getElementById(btnId);
+
+  if (!SR) {
+    statusEl.className = 'status st-error';
+    statusEl.textContent = 'この端末・ブラウザには音声認識APIがありません（window.SpeechRecognition が無い）';
+    entries.push({ label, result: 'APIなし', detail: navigator.userAgent, ms: 0 });
+    renderLog();
+    return;
+  }
+
+  btnEl.disabled = true;
+  statusEl.className = 'status st-listening';
+  statusEl.textContent = '聞いています…（短く話してください）';
+  const t0 = performance.now();
+
+  const rec = new SR();
+  rec.lang = 'ja-JP';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+
+  let done = false;
+  const finish = (ok, result, detail) => {
+    if (done) return;
+    done = true;
+    const ms = Math.round(performance.now() - t0);
+    statusEl.className = ok ? 'status st-ok' : 'status st-error';
+    statusEl.textContent = (ok ? '認識結果: ' : 'エラー: ') + result + '\n(' + ms + 'ms)';
+    entries.push({ label, result, detail: detail || '', ms });
+    renderLog();
+    btnEl.disabled = false;
+  };
+
+  rec.onresult = (ev) => finish(true, ev.results[0][0].transcript, '');
+  rec.onerror = (ev) => finish(false, ev.error, ERROR_NOTE[ev.error] || '');
+  rec.onend = () => { if (!done) finish(false, '(結果なし)', '音声が届く前に終了しました'); };
+
+  try { rec.start(); } catch (e) { finish(false, e.name, e.message); }
+}
+
+function copyLog() {
+  const text = JSON.stringify({ 機種情報: info, テスト結果: entries }, null, 2);
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+  document.getElementById('copyMsg').textContent = ok
+    ? 'コピーしました。そのまま貼り付けて送ってください。'
+    : 'コピーできませんでした。画面のスクリーンショットを送ってください。';
+}
+</script>
+
+</body>
+</html>
